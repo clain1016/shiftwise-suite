@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="login-card">
+  <div class="logo-big">
+    <svg width="64" height="64" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="ShiftWise logo">
+      <rect x="2" y="2" width="44" height="44" rx="11" fill="#2e7cf6"/>
+      <path d="M14 30 L21 20 L27 26 L34 15" stroke="#081020" stroke-width="4"
+            stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      <circle cx="34" cy="15" r="3.2" fill="#5fd7c9"/>
+      <rect x="12" y="35" width="24" height="3.4" rx="1.7" fill="#ffb347"/>
+    </svg>
+  </div>
+  <h2>Sign in to ShiftWise</h2>
+  <form method="post">
+    <input name="username" placeholder="Username" autofocus required>
+    <input type="password" name="password" placeholder="Password" required>
+    <p style="margin-bottom:0"><button class="btn">Log in</button></p>
+  </form>
+  <p class="muted" style="text-align:center; margin-top:16px">
+    Demo accounts: manager, alex, sam, jordan — password = username
+  </p>
+</div>
+{% endblock %}

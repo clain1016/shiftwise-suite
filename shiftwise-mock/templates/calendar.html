@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="page-title">Calendar — {{ view_name }}</h1>
+
+<div class="card" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:18px">
+  <a class="btn sm ghost" href="{{ url_for('calendar_view', week=prev_week, user_id=view_id if session.role=='manager' else none) }}">&larr; Prev week</a>
+  <a class="btn sm ghost" href="{{ url_for('calendar_view', week=this_week, user_id=view_id if session.role=='manager' else none) }}">This week</a>
+  <a class="btn sm ghost" href="{{ url_for('calendar_view', week=next_week, user_id=view_id if session.role=='manager' else none) }}">Next week &rarr;</a>
+  <span class="muted" style="margin-left:8px">Week of {{ week }}</span>
+  {% if employees %}
+  <form method="get" action="{{ url_for('calendar_view') }}" style="margin-left:auto">
+    <input type="hidden" name="week" value="{{ week }}">
+    <select name="user_id" onchange="this.form.submit()">
+      <option value="">— view employee —</option>
+      {% for e in employees %}
+      <option value="{{ e.id }}" {% if e.id == view_id %}selected{% endif %}>{{ e.name }}</option>
+      {% endfor %}
+    </select>
+  </form>
+  {% endif %}
+</div>
+
+<div style="display:grid; grid-template-columns:repeat(7, 1fr); gap:10px">
+  {% for d in days %}
+  <div class="cal-day {{ 'cal-today' if d.today }}">
+    <div class="cal-head">{{ d.name }} <span class="muted" style="font-weight:400">{{ d.label }}</span></div>
+    {% for s in d.shifts %}
+    <div class="cal-shift {{ 'cal-mine' if s.mine }}">
+      <div class="cal-time">{{ s.time }}</div>
+      {% if s.note %}<div class="muted">{{ s.note }}</div>{% endif %}
+      {% if s.mine %}
+        <span class="tag {{ 'warn' if s.status in ('swap_requested', 'sick') else 'ok' }}">
+          {{ {'swap_requested': 'swap requested', 'sick': 'out sick'}.get(s.status, 'scheduled') }}</span>
+      {% endif %}
+      {% if session.role == 'manager' and s.who %}
+        <div class="cal-who">{{ s.who }}</div>
+      {% endif %}
+    </div>
+    {% else %}
+    <div class="cal-empty">—</div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

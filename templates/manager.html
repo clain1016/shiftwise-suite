@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="page-title">Manager Dashboard</h1>
+<p class="muted" style="margin-bottom:20px">Week of {{ week }} — scheduling is fully automatic; your job is review only.</p>
+
+<div class="card" style="margin-bottom:6px">
+  <h2 style="margin-top:2px">Add shift</h2>
+  <form method="post" action="{{ url_for('add_shift') }}" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+    <select name="day">{% for d in DAYS %}<option>{{ d }}</option>{% endfor %}</select>
+    <input name="start" placeholder="09:00" size="6" required>
+    <input name="end" placeholder="17:00" size="6" required>
+    <input name="slots" type="number" value="1" min="1" max="10" style="width:64px">
+    <input name="note" placeholder="note (optional)" size="18">
+    <button class="btn">Add shift</button>
+  </form>
+  <p class="muted" style="margin-bottom:0">Posting a shift notifies every employee and re-runs the auto-assigner.</p>
+</div>
+
+<h2>Shifts &amp; assignments</h2>
+<table>
+  <tr><th>Day</th><th>Time</th><th>Slots</th><th>Assigned</th><th></th></tr>
+  {% for s in shifts %}
+  <tr>
+    <td><strong>{{ s.day }}</strong>{% if s.note %} <span class="muted">· {{ s.note }}</span>{% endif %}</td>
+    <td>{{ s.start_time }}–{{ s.end_time }}</td>
+    <td>
+      {% set n = assigned[s.id]|length %}
+      {% if n < s.slots %}<span class="tag warn">{{ n }}/{{ s.slots }}</span>
+      {% else %}<span class="tag ok">{{ n }}/{{ s.slots }}</span>{% endif %}
+    </td>
+    <td>
+      {% for a in assigned[s.id] %}{{ a }}{% if not loop.last %}, {% endif %}{% endfor %}
+      {% if not assigned[s.id] %}<span class="tag warn">unstaffed</span>{% endif %}
+    </td>
+    <td>
+      <form method="post" action="{{ url_for('delete_shift', shift_id=s.id) }}" style="display:inline"
+            onsubmit="return confirm('Delete this shift?')">
+        <button class="btn sm ghost">Delete</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>Employee picks (this week)</h2>
+<table>
+  <tr><th>Employee</th><th>Rank</th><th>Shift</th></tr>
+  {% for p in picks %}
+  <tr><td>{{ p.name }}</td><td>#{{ p.rank }}</td><td>{{ p.day }} {{ p.start_time }}–{{ p.end_time }}</td></tr>
+  {% else %}
+  <tr><td colspan="3" class="muted">No picks yet.</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Employees with no assignment this week</h2>
+<div class="card">
+  <p style="margin:0">{% for u in unassigned %}{{ u }}{% if not loop.last %}, {% endif %}{% else %}<span class="muted">none — everyone's assigned</span>{% endfor %}</p>
+</div>
+{% endblock %}

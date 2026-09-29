@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="page-title">Employee Requests</h1>
+<p class="muted" style="margin-bottom:18px">Day-off and vacation requests drop those shifts immediately (coverage auto-rebuilds). Sick calls and swaps never wait here — coverage is assigned the moment they're logged. Switch requests need your approval.</p>
+
+<table>
+  <tr><th>Employee</th><th>Type</th><th>Detail</th><th>Status</th><th></th></tr>
+  {% for r in items %}
+  <tr>
+    <td><strong>{{ r.name }}</strong></td>
+    <td>{{ {'day_off': 'Day off', 'vacation': 'Vacation', 'sick': 'Sick call',
+            'swap': 'Swap', 'switch': 'Switch'}[r.kind] }}</td>
+    <td>
+      {% if r.kind == 'day_off' %}{{ r.day }}
+      {% elif r.kind == 'vacation' %}{{ r.vacation_start }} → {{ r.vacation_end }}
+      {% elif r.kind == 'switch' %}{{ r.shift_desc }} &rarr; {{ r.target_desc }}
+      {% else %}{{ r.shift_desc }}{% endif %}
+    </td>
+    <td><span class="tag {{ 'ok' if r.status == 'approved_ok' else ('warn' if r.status == 'approved' else 'dim') }}">
+        {{ {'approved': 'pending', 'approved_ok': 'approved', 'denied': 'denied'}.get(r.status, r.status) }}</span></td>
+    <td>
+      {% if r.status == 'approved' %}
+      <form method="post" action="{{ url_for('approve_request', req_id=r.id) }}" style="display:inline">
+        <button class="btn sm">Approve</button>
+      </form>
+      <form method="post" action="{{ url_for('deny_request', req_id=r.id) }}" style="display:inline">
+        <button class="btn sm ghost">Deny</button>
+      </form>
+      {% endif %}
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5" class="muted">No requests yet.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

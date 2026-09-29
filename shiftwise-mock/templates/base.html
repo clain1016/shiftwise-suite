@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}ShiftWise — Staff Scheduling{% endblock %}</title>
+<style>
+  :root {
+    --bg: #0b1526;
+    --bg-soft: #122036;
+    --card: #101d31;
+    --accent: #2e7cf6;
+    --accent-dark: #1c5cd0;
+    --accent-soft: #14294a;
+    --ink: #7fd3e8;
+    --text: #dde7f2;
+    --dim: #6e8299;
+    --line: #24344d;
+    --ok: #4dd88a;
+    --warn: #ffcf5f;
+    --navy: #081020;
+    --teal: #35d4c0;
+    --shadow: 0 1px 3px rgba(0,0,0,.45), 0 4px 14px rgba(0,0,0,.3);
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    font-size: 15px;
+  }
+  /* ---------- top bar ---------- */
+  nav {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 28px;
+    height: 60px;
+    background: var(--navy);
+    border-bottom: 1px solid var(--line);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .brand { display: flex; align-items: center; gap: 11px; }
+  .brand svg { display: block; }
+  .brand .name { color: var(--ink); font-size: 17px; font-weight: 700; letter-spacing: .2px; }
+  .brand .name span { color: var(--teal); font-weight: 400; }
+  nav .links { display: flex; align-items: center; gap: 4px; margin-left: 36px; }
+  nav a {
+    color: #9fb4cc;
+    text-decoration: none;
+    padding: 7px 13px;
+    border-radius: 7px;
+    font-size: 14px;
+    font-weight: 500;
+    transition: background .15s, color .15s;
+  }
+  nav a:hover { background: rgba(46,124,246,.15); color: #fff; }
+  nav a.active { background: var(--accent); color: #081020; }
+  .nav-right { display: flex; align-items: center; gap: 14px; }
+  .nav-user { display: flex; align-items: center; gap: 9px; }
+  .avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--accent);
+    color: #081020;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700;
+  }
+  .nav-user { color: #f2e6d8; font-size: 14px; }
+  .nav-user a { color: var(--dim); font-size: 13px; padding: 4px 8px; }
+  .nav-user a:hover { color: #fff; }
+  /* ---------- layout ---------- */
+  .container { max-width: 1120px; margin: 28px auto 48px; padding: 0 20px; }
+  .flash {
+    background: var(--accent-soft);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--accent);
+    color: var(--text);
+    padding: 12px 16px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    font-size: 14px;
+  }
+  h1.page-title { font-size: 22px; color: var(--ink); margin: 4px 0 4px; font-weight: 700; }
+  h2 {
+    font-size: 15px;
+    color: var(--ink);
+    margin: 28px 0 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px 20px;
+    box-shadow: var(--shadow);
+  }
+  /* ---------- tables ---------- */
+  table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  th, td { padding: 11px 14px; text-align: left; font-size: 14px; border-bottom: 1px solid var(--line); }
+  th {
+    background: var(--bg-soft);
+    color: var(--dim);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: .06em;
+  }
+  tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: #16243a; }
+  /* ---------- tags ---------- */
+  .tag { padding: 3px 10px; border-radius: 99px; font-size: 12px; font-weight: 600; }
+  .tag.ok { background: #123826; color: var(--ok); }
+  .tag.warn { background: #3d3312; color: var(--warn); }
+  .tag.dim { background: #1a2436; color: var(--dim); }
+  /* ---------- buttons ---------- */
+  .btn {
+    background: var(--accent);
+    color: #081020;
+    border: none;
+    padding: 9px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition: background .15s, box-shadow .15s;
+  }
+  .btn:hover { background: #4f94ff; box-shadow: 0 2px 8px rgba(46,124,246,.35); }
+  .btn.sm { padding: 5px 11px; font-size: 12.5px; border-radius: 7px; }
+  .btn.ghost {
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--text);
+  }
+  .btn.ghost:hover { background: #16243a; box-shadow: none; }
+  input, select {
+    background: var(--bg-soft);
+    color: var(--text);
+    border: 1px solid var(--line);
+    padding: 9px 11px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  input:focus, select:focus { outline: 2px solid var(--accent); border-color: var(--accent); }
+  .muted { color: var(--dim); font-size: 13px; }
+  /* ---------- notifications ---------- */
+  .notif {
+    border-left: 4px solid var(--accent);
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    background: var(--card);
+    border-radius: 0 9px 9px 0;
+    font-size: 14px;
+    border-top: 1px solid var(--line);
+    border-right: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    box-shadow: var(--shadow);
+  }
+  .notif.unread { border-left-color: var(--warn); background: #142038; }
+  .notif.conflict { border-left-color: var(--warn); }
+  .notif.assignment { border-left-color: var(--ok); }
+  .notif.swap_request { border-left-color: var(--teal); }
+  .notif.new_schedule { border-left-color: var(--teal); }
+  .notif .when { color: var(--dim); font-size: 12px; margin-top: 2px; }
+  /* ---------- calendar ---------- */
+  .cal-day {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 9px;
+    min-height: 130px;
+    box-shadow: var(--shadow);
+  }
+  .cal-day.cal-today { border-color: var(--accent); border-width: 2px; padding: 8px; }
+  .cal-head { font-weight: 700; font-size: 14px; margin-bottom: 8px; color: var(--ink); }
+  .cal-shift {
+    background: var(--bg-soft);
+    border-radius: 8px;
+    padding: 6px 9px;
+    margin-bottom: 6px;
+    font-size: 13px;
+    border: 1px solid var(--line);
+  }
+  .cal-shift.cal-mine { border: 1.5px solid var(--accent); background: var(--accent-soft); }
+  .cal-time { font-size: 13px; font-weight: 700; color: var(--ink); }
+  .cal-who { color: var(--dim); font-size: 12px; margin-top: 4px; }
+  .cal-empty { color: var(--dim); font-size: 13px; }
+  /* ---------- login ---------- */
+  .login-card {
+    max-width: 380px;
+    margin: 56px auto;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 36px 34px 30px;
+    box-shadow: 0 8px 30px rgba(0,0,0,.5);
+  }
+  .login-card .logo-big { text-align: center; margin-bottom: 8px; }
+  .login-card h2 { text-align: center; margin: 6px 0 20px; font-size: 19px; text-transform: none; letter-spacing: 0; }
+  .login-card input { width: 100%; margin-bottom: 12px; }
+  .login-card .btn { width: 100%; padding: 11px; font-size: 15px; }
+  footer { text-align: center; color: var(--dim); font-size: 12px; margin: 40px 0 18px; }
+</style>
+</head>
+<body>
+<nav>
+  <div style="display:flex; align-items:center">
+    <a href="{{ url_for('dashboard') }}" style="display:flex; align-items:center; gap:11px; padding:0">
+      <svg width="34" height="34" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="ShiftWise logo">
+        <rect x="2" y="2" width="44" height="44" rx="11" fill="#2e7cf6"/>
+        <path d="M14 30 L21 20 L27 26 L34 15" stroke="#081020" stroke-width="4"
+              stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        <circle cx="34" cy="15" r="3.2" fill="#5fd7c9"/>
+        <rect x="12" y="35" width="24" height="3.4" rx="1.7" fill="#ffb347"/>
+      </svg>
+      <span class="name">ShiftWise</span>
+    </a>
+    <div class="links">
+      <a href="{{ url_for('dashboard') }}">My Schedule</a>
+      <a href="{{ url_for('calendar_view') }}">Calendar</a>
+      {% if session.role == 'manager' %}<a href="{{ url_for('manager') }}">Manager</a>
+      <a href="{{ url_for('conflicts') }}">Conflicts</a>
+      <a href="{{ url_for('requests') }}">Requests</a>
+      <a href="{{ url_for('roster') }}">Roster</a>{% endif %}
+    </div>
+  </div>
+  <div class="nav-user">
+    {% if session.uid %}
+    <span class="avatar">{{ session.name.split()[0][0] }}{{ session.name.split()[-1][0] }}</span>
+    <span class="nav-user">{{ session.name }}</span>
+    <a href="{{ url_for('logout') }}">Log out</a>
+    {% endif %}
+  </div>
+</nav>
+<div class="container">
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}<div class="flash">{{ messages[0] }}</div>{% endif %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</div>
+<footer>ShiftWise · staff scheduling for small teams · demo build</footer>
+</body>
+</html>

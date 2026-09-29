@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="page-title" id="conflicts-title">Conflicts — {{ week_start }}</h1>
+<p class="muted" style="margin-bottom:16px">Shifts where more employees picked the same day than there are open slots. Claimants are sorted by the priority lineup: full-time first, then earliest hire date. Assignments are made automatically in that order — this page is for review. Unassign someone to reopen a slot; the system immediately re-assigns it to the next person in line.</p>
+
+<div class="card" style="display:flex; gap:8px; align-items:center; margin-bottom:18px; flex-wrap:wrap">
+  <a class="btn sm ghost" href="{{ url_for('conflicts', week=prev_week) }}">&larr; Prev week</a>
+  <a class="btn sm ghost" href="{{ url_for('conflicts', week=this_week) }}">This week</a>
+  <a class="btn sm ghost" href="{{ url_for('conflicts', week=next_week) }}">Next week &rarr;</a>
+  <span class="muted" style="margin-left:8px">week of {{ week }}</span>
+</div>
+
+<div class="card" style="margin-bottom:18px">
+  Employees with picks but no shift yet this week:
+  <span class="tag {{ 'warn' if employees_without_shifts else 'ok' }}">{{ employees_without_shifts }}</span>
+</div>
+
+{% for c in conflicts %}
+<div class="card" style="margin-bottom:14px">
+  <strong style="font-size:16px">{{ c.shift.day }} {{ c.shift.start_time }}–{{ c.shift.end_time }}</strong>
+  {% if c.shift.note %}<span class="muted">· {{ c.shift.note }}</span>{% endif %}
+  <span class="tag {{ 'warn' if c.open_slots > 0 else 'ok' }}">{{ c.assigned|length }}/{{ c.shift.slots }} assigned · {{ c.open_slots }} open</span>
+  {% if c.assigned %}
+    <span class="muted">on it:</span>
+    {% for a in c.assigned %}{{ a.name }}{% if not loop.last %}, {% endif %}{% endfor %}
+  {% endif %}
+
+  {% for r in c.ranks %}
+  <table style="margin-top:10px">
+    <tr><th colspan="4">Rank #{{ r.rank }} — {{ r.claimants|length }} claimants for {{ r.open_slots }} open slot{{ 's' if r.open_slots != 1 }}</th></tr>
+    <tr><th>#</th><th>Employee</th><th>Status</th><th></th></tr>
+    {% for cl in r.claimants %}
+    <tr>
+      <td>{{ loop.index }}</td>
+      <td>{{ cl.name }}
+        <span class="tag {{ 'ok' if cl.employment_type == 'full_time' else 'dim' }}">{{ 'FT' if cl.employment_type == 'full_time' else 'PT' }}</span>
+        <span class="muted">hired {{ cl.hired_on or '—' }}</span>
+      </td>
+      <td class="muted">{{ 'assigned' if cl.user_id in c.assigned|map(attribute='id')|list else 'waiting' }}</td>
+      <td>
+        {% if c.open_slots > 0 %}
+        <span class="muted">auto-assigns in lineup order</span>
+        {% else %}
+        <span class="tag warn" title="Shift is full — Unassign someone to reopen a slot">full</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endfor %}
+
+  {% if c.assigned %}
+  <table style="margin-top:10px">
+    <tr><th colspan="2">Currently assigned</th></tr>
+    {% for a in c.assigned %}
+    <tr>
+      <td>{{ a.name }} <span class="muted">({{ 'scheduled' if a.status == 'notified' else a.status }})</span></td>
+      <td>
+        <form method="post" action="{{ url_for('unassign', shift_id=c.shift.id, user_id=a.id) }}" style="display:inline">
+          <button class="btn sm ghost">Unassign</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+{% else %}
+<div class="card"><p class="muted" style="margin:0">No conflicts this week — every shift's picks fit its slots.</p></div>
+{% endfor %}
+{% endblock %}

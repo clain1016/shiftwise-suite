@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="page-title">My Schedule</h1>
+<p class="muted" style="margin-bottom:20px">Week of {{ week }}</p>
+
+<h2>Notifications</h2>
+{% for n in notifs %}
+  <div class="notif {{ 'unread' if not n.read }} {{ n.kind }}">
+    {{ n.message }}
+    <div class="when">{{ n.created_at }}</div>
+  </div>
+{% else %}
+  <p class="muted">No notifications yet.</p>
+{% endfor %}
+
+<h2>This week's shifts</h2>
+{% if session.role == 'employee' %}
+<form method="post" action="{{ url_for('pick') }}">
+<table>
+  <tr><th>Day</th><th>Time</th><th>Staffed</th><th>Status / your pick</th><th>Your rank</th></tr>
+  {% for s in shifts %}
+  <tr>
+    <td><strong>{{ s.day }}</strong>{% if s.note %} <span class="muted">· {{ s.note }}</span>{% endif %}</td>
+    <td>{{ s.start_time }}–{{ s.end_time }}</td>
+    <td>
+      {% for name in roster[s.id] %}{{ name }}{% if not loop.last %}, {% endif %}{% endfor %}
+      {% set n = roster[s.id]|length %}
+      {% if n < s.slots %}<span class="tag warn">{{ s.slots - n }} open</span>
+      {% else %}<span class="tag ok">full</span>{% endif %}
+    </td>
+    {% if s.id in my_assignments %}
+      {% set st = my_assignments[s.id] %}
+      <td>
+        {% if st == 'sick' %}
+          <span class="tag warn">out sick</span>
+          <span class="muted">cover being arranged</span>
+        {% elif st == 'swap_requested' %}
+          <span class="tag warn">swap requested</span>
+          <span class="muted">a coverer was assigned automatically</span>
+        {% else %}
+          <span class="tag ok">scheduled</span>
+          <button class="btn sm ghost" formaction="{{ url_for('swap', shift_id=s.id) }}" formmethod="post">Request swap</button>
+          <button class="btn sm ghost" formaction="{{ url_for('request_sick', shift_id=s.id) }}" formmethod="post">Call out sick</button>
+        {% endif %}
+      </td>
+    {% else %}
+      <td><span class="tag dim">open to picks</span></td>
+    {% endif %}
+    <td><select name="rank_{{ s.id }}" required>
+      <option value="" disabled {% if s.id not in my_picks %}selected{% endif %}>pick 1–7</option>
+      {% for r in range(1, 8) %}
+        <option value="{{ r }}" {% if my_picks.get(s.id) == r %}selected{% endif %}>{{ r }}</option>
+      {% endfor %}
+    </select></td>
+  </tr>
+  {% endfor %}
+</table>
+<p><button class="btn">Save my picks</button>
+<span class="muted">Rank <strong>every day 1–{{ shifts|length }}</strong> (1 = top choice, no repeats). Even days you don't want — those ranks are your backup plan, so any shift you leave can be covered and you can be called in if others fall through. Shifts are assigned automatically by seniority and full-time priority.</span>
+</p>
+</form>
+
+<div style="display:flex; gap:18px; flex-wrap:wrap; margin-top:26px">
+  <div class="card" style="flex:1; min-width:260px">
+    <h2 style="margin-top:4px">Request a day off</h2>
+    <form method="post" action="{{ url_for('request_day_off') }}" style="display:flex; gap:8px; align-items:center">
+      <select name="day">{% for d in DAYS %}<option>{{ d }}</option>{% endfor %}</select>
+      <button class="btn sm ghost">Request day off</button>
+    </form>
+    <p class="muted">Drops your shifts and picks on that day; coverage is auto-rebuilt.</p>
+  </div>
+  <div class="card" style="flex:1; min-width:280px">
+    <h2 style="margin-top:4px">Request vacation</h2>
+    <form method="post" action="{{ url_for('request_vacation') }}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+      <input type="date" name="vac_start" required>
+      <span class="muted">to</span>
+      <input type="date" name="vac_end" required>
+      <button class="btn sm ghost">Request vacation</button>
+    </form>
+    <p class="muted">Drops any of your shifts that fall in the range; coverage is auto-rebuilt.</p>
+  </div>
+  <div class="card" style="flex:1; min-width:300px">
+    <h2 style="margin-top:4px">Switch a shift</h2>
+    {% if my_assignments %}
+    <form method="post" action="" id="switch-form"
+          onsubmit="this.action = '/request/switch/' + this.elements['my_shift'].value">
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+      <select name="my_shift">
+        {% for s in shifts %}{% if s.id in my_assignments and my_assignments[s.id] not in ('sick','swap_requested') %}
+        <option value="{{ s.id }}">{{ s.day }} {{ s.start_time }}–{{ s.end_time }} (mine)</option>
+        {% endif %}{% endfor %}
+      </select>
+      <span class="muted">for</span>
+      <select name="target_shift">
+        {% for s in shifts %}{% if s.id not in my_assignments %}
+        <option value="{{ s.id }}">{{ s.day }} {{ s.start_time }}–{{ s.end_time }}</option>
+        {% endif %}{% endfor %}
+      </select>
+      <button class="btn sm ghost">Request switch</button>
+      </div>
+    </form>
+    {% else %}
+    <p class="muted">No shifts to switch yet.</p>
+    {% endif %}
+  </div>
+</div>
+{% else %}
+<div class="card">
+  <p class="muted" style="margin:0">Managers view the schedule here — employees rank their days on their own dashboards.</p>
+</div>
+{% endif %}
+{% endblock %}

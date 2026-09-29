@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="page-title">Roster</h1>
+<p class="muted" style="margin-bottom:18px">Auto-lineup order: full-time first (in order of hire date, earliest = most senior), then part-time the same way. Set each employee's type, hire date, and weekly hours cap. The scheduler never schedules anyone past their cap.</p>
+
+<form method="post" action="{{ url_for('roster') }}">
+<table>
+  <tr><th>Employee</th><th>Employment type</th><th>Hire date</th><th>Weekly hours cap</th></tr>
+  {% for e in employees %}
+  <tr>
+    <td><strong>{{ e.name }}</strong> <span class="muted">@{{ e.username }}</span></td>
+    <td>
+      <select name="type_{{ e.id }}">
+        <option value="full_time" {% if e.employment_type == 'full_time' %}selected{% endif %}>Full-time</option>
+        <option value="part_time" {% if e.employment_type != 'full_time' %}selected{% endif %}>Part-time</option>
+      </select>
+    </td>
+    <td><input type="date" name="hired_{{ e.id }}" value="{{ e.hired_on or '' }}"></td>
+    <td><input type="number" name="cap_{{ e.id }}" value="{{ e.weekly_hours or 40 }}" min="1" max="80" style="width:74px"></td>
+  </tr>
+  {% endfor %}
+</table>
+<p><button class="btn">Save roster</button>
+<span class="muted">Saving re-runs the auto-assigner with the new lineup.</span></p>
+</form>
+{% endblock %}

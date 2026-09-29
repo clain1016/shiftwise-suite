@@ -48,8 +48,8 @@ for suf in ("", "-wal", "-shm"):
     p = Path(str(appmod.DB_PATH) + suf)
     if p.exists():
         p.unlink()
-appmod.init_db()
-n_emp, n_days, n_picks = mock_seed.seed(appmod)
+appmod.init_db(seed_demo=True)  # create schema (seed_demo bypasses the bootstrap-password requirement on a fresh DB)
+n_emp, n_days, n_picks = mock_seed.seed(appmod)  # wipe + reseed the mock roster
 print(f"mock DB reseeded: {n_emp} employees, {n_days} days/house, "
       f"{n_picks} pre-seeded picks (wiped by phase 2)")
 from mock_seed import seed

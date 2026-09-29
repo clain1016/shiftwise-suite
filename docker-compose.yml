@@ -1,0 +1,76 @@
+services:
+  app:
+    build: .
+    image: shiftwise:local
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+      # Optional machine-local secrets file (e.g. populated by a provisioning
+      # system). Override with SHIFTWISE_ENV_FILE; absent by default and
+      # never required — values here supplement, never replace, .env.
+      - path: ${SHIFTWISE_ENV_FILE:-/srv/cyberdyne/secrets/shiftwise/shiftwise.env}
+        required: false
+    environment:
+      SHIFTWISE_DB_PATH: /data/scheduler.db
+
+    volumes:
+      - shiftwise-data:/data
+    networks:
+      - app-proxy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/healthz')"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  caddy:
+    image: caddy:2.9-alpine
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+      # Same optional machine-local secrets file as the app service above.
+      - path: ${SHIFTWISE_ENV_FILE:-/srv/cyberdyne/secrets/shiftwise/shiftwise.env}
+        required: false
+    ports:
+      - "${SHIFTWISE_HTTP_PORT:-80}:80"
+      - "${SHIFTWISE_HTTPS_PORT:-443}:443"
+
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - app-proxy
+    depends_on:
+      app:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 96
+
+networks:
+  app-proxy: {}
+
+volumes:
+  shiftwise-data: {}
+  caddy-data: {}
+  caddy-config: {}

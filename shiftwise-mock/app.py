@@ -37,6 +37,21 @@ if not _secret_key:
     _secret_key = secrets.token_hex(32)
 app.secret_key = _secret_key
 
+if os.environ.get("SHIFTWISE_BEHIND_PROXY", "").lower() in ("1", "true", "yes"):
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app,
+        x_for=1,
+        x_proto=1,
+        x_host=1,
+        x_prefix=1,
+    )
+
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = os.environ.get("SHIFTWISE_SESSION_COOKIE_SAMESITE", "Lax")
+if os.environ.get("SHIFTWISE_SESSION_COOKIE_SECURE", "").lower() in ("1", "true", "yes"):
+    app.config["SESSION_COOKIE_SECURE"] = True
+
 # ---------------------------------------------------------------- database
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -101,8 +116,10 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 
 def db():
-    conn = sqlite3.connect(DB_PATH)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=15000")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
@@ -123,8 +140,10 @@ def unavailable_uids(conn, shift):
         (shift_date, shift_date, shift["week_start"], shift["day"], shift["id"]))}
 
 
-def init_db(seed_demo=False):
-    conn = sqlite3.connect(DB_PATH)
+def init_db(seed_demo=False, mock_roster=False):
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
+    conn.execute("PRAGMA busy_timeout=15000")
     conn.executescript(SCHEMA)
     # migration: add new columns to an existing users table if missing
     cols = [r[1] for r in conn.execute("PRAGMA table_info(users)")]
@@ -160,6 +179,12 @@ def init_db(seed_demo=False):
                      (generate_password_hash(password), user[0]))
     if not conn.execute("SELECT 1 FROM users LIMIT 1").fetchone():
         bootstrap_password = os.environ.get("SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD")
+        if mock_roster or seed_demo in ("8", "mock", 8) or (seed_demo and os.environ.get("SHIFTWISE_DEMO_SEED") in ("1", "8", "mock")):
+            conn.close()
+            import mock_seed
+            import sys
+            mock_seed.seed(sys.modules[__name__])
+            return
         if not seed_demo and (not bootstrap_password or len(bootstrap_password) < 12):
             conn.close()
             raise RuntimeError("Set SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD (at least 12 characters) to create the first manager")
@@ -643,6 +668,21 @@ def run_scheduler(week_start, actor="system"):
 
 
 # ---------------------------------------------------------------- routes
+@app.route("/healthz")
+def healthz():
+    try:
+        conn = db()
+        # the users table only exists after init_db ran: a missing table
+        # means the database was never initialized (sqlite auto-creates
+        # the file on connect, so SELECT 1 alone would falsely report ok)
+        conn.execute("SELECT 1 FROM users LIMIT 1").fetchone()
+        conn.close()
+        return {"status": "ok"}, 200
+    except Exception:
+        # never leak internal error details to unauthenticated callers
+        return {"status": "error"}, 503
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -1514,6 +1554,6 @@ def roster():
 
 
 if __name__ == "__main__":
-    init_db(seed_demo=os.environ.get("SHIFTWISE_DEMO_SEED") == "1")
+    init_db(seed_demo=os.environ.get("SHIFTWISE_DEMO_SEED") in ("1", "8", "mock"))
     app.run(host=os.environ.get("SHIFTWISE_HOST", "127.0.0.1"),
             port=int(os.environ.get("SHIFTWISE_PORT", "5001")), debug=False)

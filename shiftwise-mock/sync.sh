@@ -37,7 +37,7 @@ import app
 import mock_seed
 
 app.init_db(seed_demo=True)
-employees, days, picks = mock_seed.seed(app)
+employees, days, picks = mock_seed.seed(app, force=True)
 print(f"mock database seeded: {employees} fake employees (FOH+BOH), "
       f"{days} days/house, {picks} pre-seeded picks")
 PY

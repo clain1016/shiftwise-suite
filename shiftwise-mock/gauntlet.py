@@ -38,10 +38,20 @@ def all_emps():
     c.close()
     return r
 
-def sid_of(day):
+def house_of(u):
     c = appmod.db()
-    r = c.execute("SELECT id FROM shifts WHERE week_start=? AND day=?",
-                  (WEEK, day)).fetchone()
+    r = c.execute("SELECT station FROM users WHERE username=?", (u,)).fetchone()
+    c.close()
+    return r["station"] if r else "front"
+
+def sid_of(day, area=None):
+    c = appmod.db()
+    if area:
+        r = c.execute("SELECT id FROM shifts WHERE week_start=? AND day=? AND area=?",
+                      (WEEK, day, area)).fetchone()
+    else:
+        r = c.execute("SELECT id FROM shifts WHERE week_start=? AND day=?",
+                      (WEEK, day)).fetchone()
     c.close()
     return r["id"] if r else None
 
@@ -72,7 +82,8 @@ EMPS = all_emps()
 ph(1, "all " + str(len(EMPS)) + " employees rank all 7 days (required)")
 for u in EMPS:
     login(u)
-    form = {f"rank_{sid_of(d)}": str(i + 1) for i, d in enumerate(
+    house = house_of(u)
+    form = {f"rank_{sid_of(d, house)}": str(i + 1) for i, d in enumerate(
         DAYS[::-1] if u in ("riley", "priya") else DAYS)}
     r = client.post("/pick", data=form, follow_redirects=True)
     assert b"Preferences saved" in r.data, u
@@ -177,25 +188,25 @@ if j_mine:
     print(f"  jordan pulled off {tgt['day']}; backfilled by {who['name'] if who else 'NOBODY'}")
 
 # ---------- 10. roster change ----------
-ph(10, "roster change: add new part-timer (casey), they pick all 7 days")
+ph(10, "roster change: add new part-timer (avery), they pick all 7 days")
 login("manager")
 client.post("/manager/roster/add", data={
-    "username": "casey", "password": "casey-private-passphrase", "name": "Casey Nguyen",
+    "username": "avery", "password": "avery-private-passphrase", "name": "Avery Quinn",
     "weekly_hours": "20", "employment_type": "part_time",
     "hired_on": date.today().isoformat()}, follow_redirects=True)
 c = appmod.db()
-row = c.execute("SELECT id FROM users WHERE username='casey'").fetchone()
+row = c.execute("SELECT id FROM users WHERE username='avery'").fetchone()
 assert row, "new employee was not added"
 c.close()
-login("casey", "casey-private-passphrase")
-form = {f"rank_{sid_of(d)}": str(i + 1) for i, d in enumerate(DAYS)}
+login("avery", "avery-private-passphrase")
+form = {f"rank_{sid_of(d, house_of('avery'))}": str(i + 1) for i, d in enumerate(DAYS)}
 r = client.post("/pick", data=form, follow_redirects=True)
-print("  casey picked all 7 days:", b"Preferences saved" in r.data)
+print("  avery picked all 7 days:", b"Preferences saved" in r.data)
 c = appmod.db()
-casey_holds = c.execute("SELECT COUNT(*) c FROM assignments a JOIN users u ON "
-                        "u.id=a.user_id WHERE u.username='casey'").fetchone()["c"]
+avery_holds = c.execute("SELECT COUNT(*) c FROM assignments a JOIN users u ON "
+                        "u.id=a.user_id WHERE u.username='avery'").fetchone()["c"]
 c.close()
-print(f"  casey auto-assigned {casey_holds} shifts")
+print(f"  avery auto-assigned {avery_holds} shifts")
 
 # ---------- 11. final audit ----------
 ph(11, "final audit")

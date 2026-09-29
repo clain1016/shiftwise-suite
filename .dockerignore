@@ -1,0 +1,16 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+scheduler.db*
+shiftwise-mock
+test_*.py
+.env*
+*.md

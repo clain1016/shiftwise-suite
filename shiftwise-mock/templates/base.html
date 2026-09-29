@@ -240,7 +240,16 @@
   @media (max-width: 480px) {
     .cal-grid { grid-template-columns: 1fr !important; gap: 8px; }
     .cal-day { min-height: 120px; }
-    table { min-width: 640px; }
+    .roster-table { min-width: 0; display: block; border: 0; box-shadow: none; background: transparent; overflow: visible; }
+    .roster-table tr:first-child { display: none; }
+    .roster-table tr { display: block; margin-bottom: 12px; padding: 8px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+    .roster-table td { display: grid; grid-template-columns: minmax(105px, 36%) minmax(0, 1fr); gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+    .roster-table td::before { content: attr(data-label); color: var(--dim); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+    .roster-table td:last-child { display: block; border-bottom: 0; }
+    .roster-table td:last-child::before { display: block; margin-bottom: 8px; }
+    .roster-table td:last-child form { flex-wrap: wrap; }
+    .roster-table td:last-child input { width: 100%; min-width: 0; }
+    .roster-table td:last-child button { width: 100%; }
   }
   /* ---------- login ---------- */
   .login-card {
@@ -274,7 +283,6 @@
       <span class="name">ShiftWise</span>
     </a>
     <div class="links">
-      <a href="{{ url_for('dashboard') }}">My Schedule</a>
       <a href="{{ url_for('calendar_view') }}">Calendar</a>
       {% if session.role == 'manager' %}<a href="{{ url_for('manager') }}">Manager</a>
       <a href="{{ url_for('conflicts') }}">Conflicts</a>
@@ -282,7 +290,6 @@
       <a href="{{ url_for('roster') }}">Roster</a>{% endif %}
     </div>
     <div class="mobile-menu" id="mobileMenu">
-      <a href="{{ url_for('dashboard') }}">My Schedule</a>
       <a href="{{ url_for('calendar_view') }}">Calendar</a>
       {% if session.role == 'manager' %}<a href="{{ url_for('manager') }}">Manager</a>
       <a href="{{ url_for('conflicts') }}">Conflicts</a>

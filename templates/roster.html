@@ -16,30 +16,40 @@
   </form>
 </div>
 
-<form method="post" action="{{ url_for('roster') }}">
-<table>
-  <tr><th>Employee</th><th>House</th><th>Employment type</th><th>Hire date</th><th>Weekly hours cap</th></tr>
+<form id="roster-save" method="post" action="{{ url_for('roster') }}"></form>
+<table class="roster-table">
+  <tr><th>Employee</th><th>House</th><th>Employment type</th><th>Hire date</th><th>Weekly hours cap</th><th>Account</th></tr>
   {% for e in employees %}
   <tr>
-    <td><strong>{{ e.name }}</strong> <span class="muted">@{{ e.username }}</span></td>
-    <td>
-      <select name="station_{{ e.id }}">
+    <td data-label="Employee"><strong>{{ e.name }}</strong> <span class="muted">@{{ e.username }}</span></td>
+    <td data-label="House">
+      <select form="roster-save" name="station_{{ e.id }}">
         <option value="front" {% if e.station == 'front' %}selected{% endif %}>Front of house</option>
         <option value="back" {% if e.station == 'back' %}selected{% endif %}>Back of house</option>
       </select>
     </td>
-    <td>
-      <select name="type_{{ e.id }}">
+    <td data-label="Employment type">
+      <select form="roster-save" name="type_{{ e.id }}">
         <option value="full_time" {% if e.employment_type == 'full_time' %}selected{% endif %}>Full-time</option>
         <option value="part_time" {% if e.employment_type != 'full_time' %}selected{% endif %}>Part-time</option>
       </select>
     </td>
-    <td><input type="date" name="hired_{{ e.id }}" value="{{ e.hired_on or '' }}"></td>
-    <td><input type="number" name="cap_{{ e.id }}" value="{{ e.weekly_hours or 40 }}" min="1" max="168" style="width:74px"></td>
+    <td data-label="Hire date"><input form="roster-save" type="date" name="hired_{{ e.id }}" value="{{ e.hired_on or '' }}"></td>
+    <td data-label="Weekly hours cap"><input form="roster-save" type="number" name="cap_{{ e.id }}" value="{{ e.weekly_hours or 40 }}" min="1" max="168" style="width:74px"></td>
+    <td data-label="Account">
+      <form method="post" action="{{ url_for('reset_employee_password', user_id=e.id) }}" style="display:flex; gap:6px; margin-bottom:6px">
+        <input name="password" type="password" minlength="12" autocomplete="new-password" placeholder="New password (12+)" required aria-label="New password for {{ e.name }}">
+        <button class="btn">Reset password</button>
+      </form>
+      <form method="post" action="{{ url_for('delete_employee', user_id=e.id) }}" onsubmit="return confirm('Permanently delete {{ e.name }} and their schedule history?')">
+        <input type="hidden" name="confirm" value="yes">
+        <button class="btn" style="background:#a33">Delete employee</button>
+      </form>
+    </td>
   </tr>
   {% endfor %}
 </table>
-<p><button class="btn">Save roster</button>
+<p><button class="btn" type="submit" form="roster-save">Save roster</button>
 <span class="muted">Saving re-runs the auto-assigner with the new lineup.</span></p>
-</form>
+<p class="muted">Passwords are stored as hashes and cannot be viewed. Set a new temporary password here if an employee needs a reset, then share it with them securely.</p>
 {% endblock %}

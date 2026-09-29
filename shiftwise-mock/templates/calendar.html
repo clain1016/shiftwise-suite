@@ -1,23 +1,27 @@
 {% extends "base.html" %}
 {% block content %}
-<h1 class="page-title">Calendar — {{ view_name }}</h1>
+<h1 class="page-title">{{ 'Front of house' if area == 'front' else 'Back of house' }} schedule — {{ view_name }}</h1>
 
 <div class="card" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:18px">
-  <a class="btn sm ghost" href="{{ url_for('calendar_view', week=prev_week, user_id=view_id if session.role=='manager' else none) }}">&larr; Prev week</a>
-  <a class="btn sm ghost" href="{{ url_for('calendar_view', week=this_week, user_id=view_id if session.role=='manager' else none) }}">This week</a>
-  <a class="btn sm ghost" href="{{ url_for('calendar_view', week=next_week, user_id=view_id if session.role=='manager' else none) }}">Next week &rarr;</a>
+  <a class="btn sm ghost" href="{{ url_for('calendar_view', week=prev_week, area=area, user_id=view_id if session.role=='manager' else none) }}">&larr; Prev week</a>
+  <a class="btn sm ghost" href="{{ url_for('calendar_view', week=this_week, area=area, user_id=view_id if session.role=='manager' else none) }}">This week</a>
+  <a class="btn sm ghost" href="{{ url_for('calendar_view', week=next_week, area=area, user_id=view_id if session.role=='manager' else none) }}">Next week &rarr;</a>
   <span class="muted" style="margin-left:8px">Week of {{ week }}</span>
-  {% if employees %}
-  <form method="get" action="{{ url_for('calendar_view') }}" style="margin-left:auto">
+  <form method="get" action="{{ url_for('calendar_view') }}" style="margin-left:auto; display:flex; gap:8px; flex-wrap:wrap">
     <input type="hidden" name="week" value="{{ week }}">
-    <select name="user_id" onchange="this.form.submit()">
+    <select name="area" aria-label="Choose schedule" onchange="this.form.submit()">
+      <option value="front" {% if area == 'front' %}selected{% endif %}>Front of house</option>
+      <option value="back" {% if area == 'back' %}selected{% endif %}>Back of house</option>
+    </select>
+    {% if session.role == 'manager' %}
+    <select name="user_id" aria-label="Choose employee" onchange="this.form.submit()">
       <option value="">— view employee —</option>
       {% for e in employees %}
       <option value="{{ e.id }}" {% if e.id == view_id %}selected{% endif %}>{{ e.name }}</option>
       {% endfor %}
     </select>
+    {% endif %}
   </form>
-  {% endif %}
 </div>
 
 <div class="cal-grid" style="display:grid; grid-template-columns:repeat(7, 1fr); gap:10px">

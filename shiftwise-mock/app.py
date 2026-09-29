@@ -246,7 +246,14 @@ def login_required(role=None):
         def wrapper(*a, **kw):
             if "uid" not in session:
                 return redirect(url_for("login"))
-            if role and session.get("role") != role:
+            conn = db()
+            user = conn.execute("SELECT role FROM users WHERE id=?",
+                                (session["uid"],)).fetchone()
+            conn.close()
+            if not user:
+                session.clear()
+                return redirect(url_for("login"))
+            if role and (user["role"] != role or session.get("role") != role):
                 abort(403)
             return f(*a, **kw)
         return wrapper
@@ -1474,10 +1481,15 @@ def deny_request(req_id):
 
 
 # ---------------------------------------------------------------- calendar
-def calendar_days(conn, week, user_id):
+def calendar_days(conn, week, user_id, area=None):
     """7-day grid for a week: shifts per day, assignment status + staff for user_id."""
-    shifts = conn.execute(
-        "SELECT * FROM shifts WHERE week_start=? ORDER BY id", (week,)).fetchall()
+    if area in ("front", "back"):
+        shifts = conn.execute(
+            "SELECT * FROM shifts WHERE week_start=? AND area=? ORDER BY id",
+            (week, area)).fetchall()
+    else:
+        shifts = conn.execute(
+            "SELECT * FROM shifts WHERE week_start=? ORDER BY id", (week,)).fetchall()
     by_day = defaultdict(list)
     for s in shifts:
         rows = conn.execute(
@@ -1515,24 +1527,31 @@ def calendar_view():
         week = monday_of(date.today()).isoformat()
     conn = db()
     uid = session["uid"]
+    current_user = conn.execute(
+        "SELECT station FROM users WHERE id=?", (uid,)).fetchone()
+    area = request.args.get("area")
+    if area not in ("front", "back"):
+        area = current_user["station"] if current_user else "front"
     employees = []
     if session["role"] == "manager":
         employees = conn.execute(
-            "SELECT id, name FROM users WHERE role='employee' ORDER BY name").fetchall()
+            "SELECT id, name FROM users WHERE role='employee' AND station=? ORDER BY name",
+            (area,)).fetchall()
         req = request.args.get("user_id", "")
         if req.isdigit():
             row = conn.execute(
-                "SELECT id FROM users WHERE id=? AND role='employee'", (int(req),)).fetchone()
+                "SELECT id FROM users WHERE id=? AND role='employee' AND station=?",
+                (int(req), area)).fetchone()
             if row:
                 uid = row["id"]
     view_user = conn.execute("SELECT name FROM users WHERE id=?", (uid,)).fetchone()
-    days = calendar_days(conn, week, uid)
+    days = calendar_days(conn, week, uid, area)
     conn.close()
     d = date.fromisoformat(week)
     return render_template(
         "calendar.html", days=days, week=week,
         view_name=view_user["name"] if view_user else session.get("name", ""),
-        employees=employees, view_id=uid,
+        employees=employees, view_id=uid, area=area,
         prev_week=(d - timedelta(days=7)).isoformat(),
         next_week=(d + timedelta(days=7)).isoformat(),
         this_week=monday_of(date.today()).isoformat())
@@ -1577,6 +1596,51 @@ def add_employee():
         flash("Employee added.")
     finally:
         conn.close()
+    return redirect(url_for("roster"))
+
+
+@app.route("/manager/roster/<int:user_id>/password", methods=["POST"])
+@login_required(role="manager")
+def reset_employee_password(user_id):
+    password = request.form.get("password", "")
+    if len(password) < 12:
+        flash("Use a new password of at least 12 characters.")
+        return redirect(url_for("roster"))
+    conn = db()
+    employee = conn.execute(
+        "SELECT id FROM users WHERE id=? AND role='employee'", (user_id,)).fetchone()
+    if not employee:
+        conn.close()
+        abort(404)
+    conn.execute("UPDATE users SET password=? WHERE id=?",
+                 (generate_password_hash(password), user_id))
+    conn.commit()
+    conn.close()
+    flash("Employee password reset. Share the new password securely.")
+    return redirect(url_for("roster"))
+
+
+@app.route("/manager/roster/<int:user_id>/delete", methods=["POST"])
+@login_required(role="manager")
+def delete_employee(user_id):
+    if request.form.get("confirm") != "yes":
+        flash("Confirm employee deletion before continuing.")
+        return redirect(url_for("roster"))
+    conn = db()
+    employee = conn.execute(
+        "SELECT id FROM users WHERE id=? AND role='employee'", (user_id,)).fetchone()
+    if not employee:
+        conn.close()
+        abort(404)
+    # These tables have no cascading foreign keys; remove the employee's
+    # history before removing the account to avoid dangling user references.
+    for table in ("assignments", "picks", "requests", "notifications"):
+        conn.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+    conn.execute("DELETE FROM users WHERE id=? AND role='employee'", (user_id,))
+    conn.commit()
+    conn.close()
+    run_scheduler(monday_of(date.today()).isoformat())
+    flash("Employee deleted; the current week's schedule was rebuilt.")
     return redirect(url_for("roster"))
 
 

@@ -36,9 +36,12 @@ if [[ "${1:-}" == "--reseed" ]]; then
     SHIFTWISE_DB_PATH="$PWD/scheduler.db" "$python_bin" - <<'PY'
 import app
 import mock_seed
+from datetime import date
 
 app.init_db(seed_demo=True)
-employees, days, picks = mock_seed.seed(app, force=True)
+employees, days, picks = mock_seed.seed(app)
+week = mock_seed.monday_of(date.today()).isoformat()
+app.run_scheduler(week)
 print(f"mock database seeded: {employees} fake employees (FOH+BOH), "
       f"{days} days/house, {picks} pre-seeded picks")
 PY

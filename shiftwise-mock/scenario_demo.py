@@ -31,6 +31,11 @@ import mock_seed
 DAYS = appmod.DAYS
 week = appmod.monday_of(appmod.date.today()).isoformat()
 
+# Isolated database: defaults to the mock's working DB (left populated for
+# click-through on port 5001); set SHIFTWISE_SCENARIO_DB_PATH to redirect.
+appmod.DB_PATH = Path(os.environ.get("SHIFTWISE_SCENARIO_DB_PATH",
+                                     os.path.join(MOCKDIR, "scheduler.db")))
+
 # ---------------- fresh mock DB
 for suffix in ("", "-wal", "-shm"):
     p = Path(str(appmod.DB_PATH) + suffix)
@@ -134,7 +139,11 @@ for user, prefs in PREFS.items():
     login(user)
     client.get("/")
     conn = appmod.db()
-    day_to_id = {r["day"]: r["id"] for r in conn.execute("SELECT id, day FROM shifts")}
+    house = conn.execute(
+        "SELECT station FROM users WHERE username=?", (user,)).fetchone()["station"]
+    day_to_id = {r["day"]: r["id"] for r in conn.execute(
+        "SELECT id, day FROM shifts WHERE week_start=? AND area=?",
+        (week, house))}
     conn.close()
     form = full_form(day_to_id, [day for day, _ in sorted(
         prefs.items(), key=lambda item: item[1])])
@@ -193,7 +202,8 @@ j_shift = conn.execute(
     "WHERE a.user_id=? AND s.week_start=? AND a.status='notified' LIMIT 1",
     (emp_uid("jordan"), week)).fetchone()
 full_target = conn.execute(
-    "SELECT s.id, s.day FROM shifts s WHERE s.week_start=? AND s.id NOT IN "
+    "SELECT s.id, s.day FROM shifts s WHERE s.week_start=? AND s.area="
+    "(SELECT station FROM users WHERE username='jordan') AND s.id NOT IN "
     "(SELECT a.shift_id FROM assignments a WHERE a.user_id=?) AND "
     "(SELECT COUNT(*) FROM assignments a WHERE a.shift_id=s.id AND a.status NOT IN ('sick','swap_requested')) >= s.slots "
     "ORDER BY s.id LIMIT 1", (week, emp_uid("jordan"))).fetchone()
@@ -250,7 +260,8 @@ print("=" * 64)
 login("riley")
 client.get("/")
 conn = appmod.db()
-day_to_id = {r["day"]: r["id"] for r in conn.execute("SELECT id, day FROM shifts")}
+day_to_id = {r["day"]: r["id"] for r in conn.execute(
+    "SELECT id, day FROM shifts WHERE week_start=? AND area='back'", (week,))}
 conn.close()
 form = full_form(day_to_id, ["Mon", "Tue", "Wed", "Fri", "Sat"])
 assert b"Preferences saved" in client.post(
@@ -271,7 +282,8 @@ print("=" * 64)
 login("sam")
 client.get("/")
 conn = appmod.db()
-day_to_id = {r["day"]: r["id"] for r in conn.execute("SELECT id, day FROM shifts")}
+day_to_id = {r["day"]: r["id"] for r in conn.execute(
+    "SELECT id, day FROM shifts WHERE week_start=? AND area='front'", (week,))}
 conn.close()
 form = full_form(day_to_id, ["Mon", "Tue", "Wed", "Thu", "Fri", "Sun"])
 assert b"Preferences saved" in client.post(

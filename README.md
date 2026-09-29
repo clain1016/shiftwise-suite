@@ -45,3 +45,41 @@ The root `test_*.py` scripts and `shiftwise-mock/test_mock.py` use temporary dat
 .venv/bin/python test_requests.py
 .venv/bin/python shiftwise-mock/test_mock.py
 ```
+
+## Container deployment
+
+ShiftWise includes container deployment files to run Gunicorn behind a Caddy reverse proxy with automatic TLS.
+
+### Environment
+
+Copy `.env.example` to `.env`:
+
+```sh
+cp .env.example .env
+```
+
+Set the required values in `.env`:
+
+```sh
+SHIFTWISE_SECRET_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD="your-strong-manager-password"
+SHIFTWISE_PUBLIC_HOSTNAME="shiftwise.example.com"
+SHIFTWISE_ACME_EMAIL="admin@example.com"
+SHIFTWISE_DEMO_SEED=1
+```
+
+### Docker Compose
+
+```sh
+# Validate configuration
+docker compose config
+
+# Build and launch stack in background
+docker compose up -d --build
+
+# Check status and health
+docker compose ps
+
+# View logs
+docker compose logs -f
+```

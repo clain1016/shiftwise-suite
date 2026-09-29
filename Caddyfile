@@ -1,0 +1,69 @@
+{
+	email {$SHIFTWISE_ACME_EMAIL:operator@cysys.dev}
+	servers {
+		max_header_size 16kb
+	}
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request delete
+				resp_headers delete
+			}
+		}
+	}
+}
+
+{$SHIFTWISE_PUBLIC_HOSTNAME:localhost} {
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request delete
+				resp_headers delete
+			}
+		}
+	}
+	log_append correlation_id {http.request.uuid}
+	encode zstd gzip
+
+	request_body {
+		max_size 2MB
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		-Server
+	}
+
+	@health path /healthz
+	handle @health {
+		reverse_proxy app:5000 {
+			header_up X-Request-ID {http.request.uuid}
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 10s
+			}
+		}
+		log_append upstream_duration_ms {rp.upstream.duration_ms}
+		log_append upstream_latency_ms {rp.upstream.latency_ms}
+	}
+
+	handle {
+		reverse_proxy app:5000 {
+			header_up X-Request-ID {http.request.uuid}
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 30s
+			}
+		}
+		log_append upstream_duration_ms {rp.upstream.duration_ms}
+		log_append upstream_latency_ms {rp.upstream.latency_ms}
+	}
+}

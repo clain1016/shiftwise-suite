@@ -34,16 +34,17 @@ cd shiftwise-mock
 ../.venv/bin/python app.py
 ```
 
-`--reseed` deletes the mock database and its request history. Run `./shiftwise-mock/sync.sh` without that flag to keep the current mock data. The mock listens on `127.0.0.1:5001` and has known demo passwords, so keep it local. The suite's `.venv` is used by both apps and all tests; the older `scheduler` checkout is not required.
+`--reseed` deletes the mock database and its request history. Run `./shiftwise-mock/sync.sh` without that flag to keep the current mock data, then restart the mock process to load the synced code. The mock listens on port 5001 on all interfaces: open `http://<this-machine's-LAN-IPv4>:5001/login` from another device on the same network (`hostname -I` shows local addresses). Only run it on a trusted LAN: the demo accounts have known passwords and local HTTP is unencrypted. Set `SHIFTWISE_HOST=127.0.0.1` when starting it to restrict access to this machine. The real app still defaults to loopback on port 5000. The suite's `.venv` is used by both apps and all tests; the older `scheduler` checkout is not required.
 
 ## Tests
 
-The root `test_*.py` scripts and `shiftwise-mock/test_mock.py` use temporary databases. They do not touch `scheduler.db`. Run them with the virtual environment's Python, for example:
+The root `test_*.py` scripts and mock tests use temporary databases. The LAN bind test backs up the existing seeded mock database into a temporary copy, so run `sync.sh --reseed` once before it. Tests do not modify either app's `scheduler.db`. Run them with the virtual environment's Python, for example:
 
 ```sh
 .venv/bin/python test_flow.py
 .venv/bin/python test_requests.py
 .venv/bin/python shiftwise-mock/test_mock.py
+.venv/bin/python shiftwise-mock/test_lan_bind.py
 ```
 
 ## Container deployment

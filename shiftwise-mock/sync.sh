@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Sync the mock ShiftWise twin from the real app after every feature addition.
-# Copies app.py + templates, fixes the port to 5001, and (with --reseed)
+# Copies app.py + templates, binds on the LAN at port 5001, and (with --reseed)
 # force-reseeds the mock DB with the fake FOH/BOH roster and Mon-Sun demo week.
 set -euo pipefail
 
@@ -19,7 +19,7 @@ fi
 cp ../app.py app.py
 cp ../templates/*.html templates/
 
-# The mock runs on its own port and database. Keep these settings local to
+# The mock runs on its own LAN listener and database. Keep these settings local to
 # the copied entry point so the scheduler logic stays identical.
 "$python_bin" - <<'PY'
 from pathlib import Path
@@ -28,6 +28,8 @@ path = Path("app.py")
 source = path.read_text()
 source = source.replace('os.environ.get("SHIFTWISE_PORT", "5000")',
                         'os.environ.get("SHIFTWISE_PORT", "5001")')
+source = source.replace('os.environ.get("SHIFTWISE_HOST", "127.0.0.1")',
+                        'os.environ.get("SHIFTWISE_HOST", "0.0.0.0")')
 path.write_text(source)
 PY
 

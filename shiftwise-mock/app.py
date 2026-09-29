@@ -1632,5 +1632,5 @@ def roster():
 
 if __name__ == "__main__":
     init_db(seed_demo=os.environ.get("SHIFTWISE_DEMO_SEED") in ("1", "8", "mock"))
-    app.run(host=os.environ.get("SHIFTWISE_HOST", "127.0.0.1"),
+    app.run(host=os.environ.get("SHIFTWISE_HOST", "0.0.0.0"),
             port=int(os.environ.get("SHIFTWISE_PORT", "5001")), debug=False)

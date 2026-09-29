@@ -37,7 +37,7 @@
           <span class="muted">cover being arranged</span>
         {% elif st == 'swap_requested' %}
           <span class="tag warn">swap requested</span>
-          <span class="muted">a coverer was assigned automatically</span>
+          <span class="muted">coverage is pending manager review</span>
         {% else %}
           <span class="tag ok">scheduled</span>
           <button class="btn sm ghost" formaction="{{ url_for('swap', shift_id=s.id) }}" formmethod="post">Request swap</button>
@@ -48,8 +48,8 @@
       <td><span class="tag dim">open to picks</span></td>
     {% endif %}
     <td><select name="rank_{{ s.id }}" required>
-      <option value="" disabled {% if s.id not in my_picks %}selected{% endif %}>pick 1–7</option>
-      {% for r in range(1, 8) %}
+      <option value="" disabled {% if s.id not in my_picks %}selected{% endif %}>pick 1–{{ shifts|length }}</option>
+      {% for r in range(1, shifts|length + 1) %}
         <option value="{{ r }}" {% if my_picks.get(s.id) == r %}selected{% endif %}>{{ r }}</option>
       {% endfor %}
     </select></td>
@@ -57,7 +57,7 @@
   {% endfor %}
 </table>
 <p><button class="btn">Save my picks</button>
-<span class="muted">Rank <strong>every day 1–{{ shifts|length }}</strong> (1 = top choice, no repeats). Even days you don't want — those ranks are your backup plan, so any shift you leave can be covered and you can be called in if others fall through. Shifts are assigned automatically by seniority and full-time priority.</span>
+<span class="muted">Rank <strong>every shift 1–{{ shifts|length }}</strong> (1 = top choice, no repeats). Lower ranks are backup choices. Shifts are assigned automatically by seniority and full-time priority.</span>
 </p>
 </form>
 
@@ -68,7 +68,7 @@
       <select name="day">{% for d in DAYS %}<option>{{ d }}</option>{% endfor %}</select>
       <button class="btn sm ghost">Request day off</button>
     </form>
-    <p class="muted">Drops your shifts and picks on that day; coverage is auto-rebuilt.</p>
+    <p class="muted">Frees your shifts on that day while the manager reviews the request.</p>
   </div>
   <div class="card" style="flex:1; min-width:280px">
     <h2 style="margin-top:4px">Request vacation</h2>
@@ -78,7 +78,7 @@
       <input type="date" name="vac_end" required>
       <button class="btn sm ghost">Request vacation</button>
     </form>
-    <p class="muted">Drops any of your shifts that fall in the range; coverage is auto-rebuilt.</p>
+    <p class="muted">Frees your shifts in the selected range while the manager reviews the request.</p>
   </div>
   <div class="card" style="flex:1; min-width:300px">
     <h2 style="margin-top:4px">Switch a shift</h2>

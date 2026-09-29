@@ -74,11 +74,14 @@ def seed(appmod):
     site is immediately testable without manual input.
     """
     conn = appmod.db()
-    for table in ("picks", "assignments", "notifications", "shifts", "users"):
+    for table in ("picks", "assignments", "notifications", "requests", "shifts", "users"):
         conn.execute(f"DELETE FROM {table}")
     conn.executemany(
         "INSERT INTO users (username, password, name, role, weekly_hours,"
         " employment_type, hired_on, station) VALUES (?,?,?,?,?,?,?,?)", ROSTER)
+    for username, *_ in ROSTER:
+        conn.execute("UPDATE users SET password=? WHERE username=?",
+                     (appmod.generate_password_hash(username), username))
     week = monday_of(date.today()).isoformat()
     conn.executemany(
         "INSERT INTO shifts (week_start, day, start_time, end_time, slots, note, area) "

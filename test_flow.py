@@ -5,13 +5,15 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import app as appmod
+from test_support import isolate_database
+_test_db = isolate_database(appmod)
 
 # fresh DB for the test
 DB = appmod.DB_PATH
 if DB.exists():
     DB.unlink()
 
-appmod.init_db()
+appmod.init_db(seed_demo=True)
 client = appmod.app.test_client()
 
 def login(user, pw):

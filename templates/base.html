@@ -242,6 +242,7 @@
     {% if session.uid %}
     <span class="avatar">{{ session.name.split()[0][0] }}{{ session.name.split()[-1][0] }}</span>
     <span class="nav-user">{{ session.name }}</span>
+    <a href="{{ url_for('change_password') }}">Password</a>
     <a href="{{ url_for('logout') }}">Log out</a>
     {% endif %}
   </div>
@@ -252,6 +253,6 @@
   {% endwith %}
   {% block content %}{% endblock %}
 </div>
-<footer>ShiftWise · staff scheduling for small teams · demo build</footer>
+<footer>ShiftWise · staff scheduling for small teams</footer>
 </body>
 </html>

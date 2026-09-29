@@ -22,6 +22,7 @@ Final:   audit — understaffed slots, over-cap employees, cross-house leaks
 The mock DB is left in the final state — click through on port 5001.
 """
 import random
+import os
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -32,10 +33,14 @@ sys.path.insert(0, str(MOCKDIR))
 import app as appmod  # noqa: E402
 import mock_seed  # noqa: E402
 
+# Isolated database: never touches the working database unless
+# SHIFTWISE_SCENARIO_DB_PATH points at it explicitly.
+appmod.DB_PATH = Path(os.environ.get("SHIFTWISE_SCENARIO_DB_PATH", MOCKDIR / "mock.db"))
+
 seed = int(sys.argv[1]) if len(sys.argv) > 1 else \
     random.SystemRandom().randrange(2 ** 32)
 rng = random.Random(seed)
-print(f"\nRANDOM SEED = {seed}   (replay: /home/cody/scheduler/.venv/bin/python "
+print(f"\nRANDOM SEED = {seed}   (replay: python "
       f"{Path(__file__).name} {seed})\n")
 
 # ---------- fresh mock DB
@@ -47,6 +52,7 @@ appmod.init_db()
 n_emp, n_days, n_picks = mock_seed.seed(appmod)
 print(f"mock DB reseeded: {n_emp} employees, {n_days} days/house, "
       f"{n_picks} pre-seeded picks (wiped by phase 2)")
+from mock_seed import seed
 
 client = appmod.app.test_client()
 WEEK = appmod.monday_of(date.today()).isoformat()
@@ -148,7 +154,6 @@ def snapshot(title):
         over = "  <<OVER CAP>>" if hrs > (u["weekly_hours"] or 40) else ""
         print(f"    {u['name'].split()[0]:<7} {u['station'][:1].upper()}FH "
               f"cap {u['weekly_hours']}h -> {hrs:>4.0f}h | {wd}{over}")
-
 
 def phase(n, title):
     print("\n" + "=" * 64)

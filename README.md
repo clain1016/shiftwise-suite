@@ -1,23 +1,47 @@
 # ShiftWise Suite
 
-ShiftWise — auto-scheduling staff scheduler (Flask + SQLite): priority lineup, self-service day-off/vacation/sick/swap requests, automatic coverage backfill — plus its mock demo twin in one repository.
+ShiftWise is a Flask and SQLite staff scheduler. Employees rank shifts, and the scheduler assigns available staff by employment type and hire date. The repository also contains a separate mock demo.
 
-## Layout
+## Setup
 
-- `/` — the real app (ShiftWise). Run it on port 5000:
-  `python app.py`
-- `/shiftwise-mock/` — mock demo twin (8 fake employees, Mon-Sun demo week, pre-seeded picks) for instant click-testing with no manual data entry. Runs on port 5001:
-  `cd shiftwise-mock && python app.py`
+Create a virtual environment and install the dependency:
 
-## Mock workflow
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
 
-After every feature added to the real app, run:
+On first start, set a manager password of at least 12 characters and a stable, random session secret. The manager account is created as `manager`; add employees from the Roster page.
 
-    ./shiftwise-mock/sync.sh
+```sh
+read -rsp 'Manager password: ' SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD
+export SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD
+export SHIFTWISE_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+.venv/bin/python app.py
+```
 
-which copies app.py + templates from the real app into the mock, ports it to 5001, and reseeds via `mock_seed.py`.
+The app listens on `127.0.0.1:5000` by default. Set `SHIFTWISE_HOST` and `SHIFTWISE_PORT` to change the listener. Keep the session secret stable across restarts. Set `SHIFTWISE_DB_PATH` to place the SQLite database elsewhere. The bootstrap password is needed only when creating the first manager or replacing an old demo manager password.
+
+Existing databases with plain text passwords are migrated to password hashes at startup. If an existing manager still uses the old demo password `manager`, set `SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD` to replace it during migration. Employees who used shared demo passwords can change them through the Password link after signing in.
+
+## Mock demo
+
+The mock source mirrors the main app. To sync it and create a fresh eight employee demo database:
+
+```sh
+./shiftwise-mock/sync.sh --reseed
+cd shiftwise-mock
+../.venv/bin/python app.py
+```
+
+`--reseed` deletes the mock database and its request history. Run `./shiftwise-mock/sync.sh` without that flag to keep the current mock data. The mock listens on `127.0.0.1:5001` and has known demo passwords, so keep it local.
 
 ## Tests
 
-- Real app: `test_priority.py`, `test_flow.py`, `test_calendar.py`, `test_conflicts.py`, `test_requests.py`, `test_days_off.py`, `test_manager_pick.py`, `test_preferred_schedule.py`, `test_rebuild_recompute.py` (repo root)
-- Mock: `shiftwise-mock/test_mock.py`
+The root `test_*.py` scripts and `shiftwise-mock/test_mock.py` use temporary databases. They do not touch `scheduler.db`. Run them with the virtual environment's Python, for example:
+
+```sh
+.venv/bin/python test_flow.py
+.venv/bin/python test_requests.py
+.venv/bin/python shiftwise-mock/test_mock.py
+```

@@ -9,9 +9,11 @@ Flow:
   4. Employees see their schedule; shifts are assigned automatically with
    no employee confirmation step (swap requests still ping the manager).
 
-Run: .venv/bin/python app.py  ->  http://<your-ip>:5000
+Run: .venv/bin/python app.py  ->  http://127.0.0.1:5000
 """
 import sqlite3
+import os
+import secrets
 from collections import defaultdict
 from datetime import datetime, timedelta, date
 from functools import wraps
@@ -19,13 +21,21 @@ from pathlib import Path
 
 from flask import (Flask, request, session, redirect, url_for, flash,
                    render_template, abort)
+from werkzeug.security import check_password_hash, generate_password_hash
 
-DB_PATH = Path(__file__).parent / "scheduler.db"
+DB_PATH = Path(os.environ.get("SHIFTWISE_DB_PATH", Path(__file__).parent / "scheduler.db"))
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 MIN_DAYS_OFF = 2  # every employee gets at least 2 days off per week
 
 app = Flask(__name__)
-app.secret_key = "change-me-in-production"
+_secret_key = os.environ.get("SHIFTWISE_SECRET_KEY")
+if not _secret_key:
+    print("WARNING: SHIFTWISE_SECRET_KEY is not set — using an ephemeral "
+          "session secret. All sessions are invalidated on every restart. "
+          "Set a stable SHIFTWISE_SECRET_KEY for any real deployment.",
+          flush=True)
+    _secret_key = secrets.token_hex(32)
+app.secret_key = _secret_key
 
 # ---------------------------------------------------------------- database
 SCHEMA = """
@@ -74,6 +84,7 @@ CREATE TABLE IF NOT EXISTS requests (
     target_shift_id INTEGER,         -- switch: the desired shift
     vacation_start TEXT,             -- vacation: range start (inclusive)
     vacation_end TEXT,               -- vacation: range end (inclusive)
+    week_start TEXT,                 -- day_off: the week requested
     status TEXT NOT NULL DEFAULT 'approved',
     created_at TEXT NOT NULL
 );
@@ -100,19 +111,19 @@ def monday_of(d):
     return d - timedelta(days=d.weekday())
 
 
-def vacation_blocked_uids(conn):
-    """User ids whose CURRENT approved vacation covers the given shift's
-    date. Used as a hard filter in the lineup + backfill so a vacationing
-    employee is never assigned (or re-assigned) onto a shift inside their
-    range. Only status-approved vacation requests count."""
-    rows = conn.execute(
-        "SELECT user_id, vacation_start, vacation_end FROM requests "
-        "WHERE kind='vacation' AND status IN ('approved', 'approved_ok') "
-        "AND vacation_start IS NOT NULL").fetchall()
-    return {r["user_id"]: (r["vacation_start"], r["vacation_end"]) for r in rows}
+def unavailable_uids(conn, shift):
+    """Employees with an active absence or swap request for this shift."""
+    shift_date = (date.fromisoformat(shift["week_start"]) +
+                  timedelta(days=DAYS.index(shift["day"]))).isoformat()
+    return {r["user_id"] for r in conn.execute(
+        "SELECT user_id FROM requests WHERE status IN ('approved', 'approved_ok') "
+        "AND ((kind='vacation' AND vacation_start<=? AND vacation_end>=?) "
+        "OR (kind='day_off' AND week_start=? AND day=?) "
+        "OR (kind IN ('swap','manager_unassign') AND shift_id=?))",
+        (shift_date, shift_date, shift["week_start"], shift["day"], shift["id"]))}
 
 
-def init_db():
+def init_db(seed_demo=False):
     conn = sqlite3.connect(DB_PATH)
     conn.executescript(SCHEMA)
     # migration: add new columns to an existing users table if missing
@@ -134,40 +145,64 @@ def init_db():
         conn.execute("ALTER TABLE requests ADD COLUMN vacation_start TEXT")
     if "vacation_end" not in rcols:
         conn.execute("ALTER TABLE requests ADD COLUMN vacation_end TEXT")
+    if "week_start" not in rcols:
+        conn.execute("ALTER TABLE requests ADD COLUMN week_start TEXT")
+    for user in conn.execute("SELECT id, username, password FROM users").fetchall():
+        password = user[2]
+        if password.startswith(("scrypt:", "pbkdf2:")):
+            continue
+        if user[1] == "manager" and password == "manager" and not seed_demo:
+            password = os.environ.get("SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD")
+            if not password or len(password) < 12:
+                conn.close()
+                raise RuntimeError("Set SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD (at least 12 characters) to replace the demo manager password")
+        conn.execute("UPDATE users SET password=? WHERE id=?",
+                     (generate_password_hash(password), user[0]))
     if not conn.execute("SELECT 1 FROM users LIMIT 1").fetchone():
-        conn.executemany(
-            "INSERT INTO users (username, password, name, role, weekly_hours,"
-            " employment_type, hired_on, station) VALUES (?,?,?,?,?,?,?,?)",
-            [
-                ("manager", "manager", "Store Manager", "manager", 40, "full_time", "2020-01-15", "front"),
-                ("alex", "alex", "Alex Rivera", "employee", 30, "full_time", "2021-03-01", "front"),
-                ("sam", "sam", "Sam Chen", "employee", 25, "part_time", "2023-06-10", "front"),
-                ("taylor", "taylor", "Taylor Brooks", "employee", 20, "part_time", "2025-02-11", "front"),
-                ("jordan", "jordan", "Jordan Diaz", "employee", 35, "part_time", "2024-11-20", "back"),
-                ("casey", "casey", "Casey Boots", "employee", 35, "part_time", "2023-05-01", "back"),
-                ("morgan", "morgan", "Morgan Vale", "employee", 40, "full_time", "2022-08-15", "back"),
-            ],
-        )
-        week = monday_of(date.today()).isoformat()
-        demo = [
-            (week, "Mon", "09:00", "17:00", 1, None, "front"),
-            (week, "Tue", "09:00", "17:00", 1, None, "front"),
-            (week, "Wed", "09:00", "17:00", 1, None, "front"),
-            (week, "Thu", "09:00", "17:00", 1, None, "front"),
-            (week, "Fri", "09:00", "17:00", 1, None, "front"),
-            (week, "Sat", "10:00", "18:00", 2, "Weekend rush", "front"),
-            (week, "Sun", "11:00", "16:00", 1, "Short day", "front"),
-            (week, "Mon", "06:00", "14:00", 1, None, "back"),
-            (week, "Tue", "06:00", "14:00", 1, None, "back"),
-            (week, "Wed", "06:00", "14:00", 1, None, "back"),
-            (week, "Thu", "06:00", "14:00", 1, None, "back"),
-            (week, "Fri", "11:00", "20:00", 1, "Dinner prep + service", "back"),
-            (week, "Sat", "10:00", "20:00", 1, "Weekend covers", "back"),
-            (week, "Sun", "10:00", "16:00", 1, "Brunch", "back"),
-        ]
-        conn.executemany(
-            "INSERT INTO shifts (week_start, day, start_time, end_time, slots, note, area) "
-            "VALUES (?,?,?,?,?,?,?)", demo)
+        bootstrap_password = os.environ.get("SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD")
+        if not seed_demo and (not bootstrap_password or len(bootstrap_password) < 12):
+            conn.close()
+            raise RuntimeError("Set SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD (at least 12 characters) to create the first manager")
+        if not seed_demo:
+            conn.execute(
+                "INSERT INTO users (username, password, name, role, weekly_hours, "
+                "employment_type, station) VALUES (?,?,?,?,?,?,?)",
+                ("manager", generate_password_hash(bootstrap_password),
+                 "Store Manager", "manager", 40, "full_time", "front"))
+        else:
+            conn.executemany(
+                "INSERT INTO users (username, password, name, role, weekly_hours,"
+                " employment_type, hired_on, station) VALUES (?,?,?,?,?,?,?,?)",
+                [
+                    ("manager", generate_password_hash("manager"), "Store Manager", "manager", 40, "full_time", "2020-01-15", "front"),
+                    ("alex", generate_password_hash("alex"), "Alex Rivera", "employee", 30, "full_time", "2021-03-01", "front"),
+                    ("sam", generate_password_hash("sam"), "Sam Chen", "employee", 25, "part_time", "2023-06-10", "front"),
+                    ("taylor", generate_password_hash("taylor"), "Taylor Brooks", "employee", 20, "part_time", "2025-02-11", "front"),
+                    ("jordan", generate_password_hash("jordan"), "Jordan Diaz", "employee", 35, "part_time", "2024-11-20", "back"),
+                    ("casey", generate_password_hash("casey"), "Casey Boots", "employee", 35, "part_time", "2023-05-01", "back"),
+                    ("morgan", generate_password_hash("morgan"), "Morgan Vale", "employee", 40, "full_time", "2022-08-15", "back"),
+                ],
+            )
+            week = monday_of(date.today()).isoformat()
+            demo = [
+                (week, "Mon", "09:00", "17:00", 1, None, "front"),
+                (week, "Tue", "09:00", "17:00", 1, None, "front"),
+                (week, "Wed", "09:00", "17:00", 1, None, "front"),
+                (week, "Thu", "09:00", "17:00", 1, None, "front"),
+                (week, "Fri", "09:00", "17:00", 1, None, "front"),
+                (week, "Sat", "10:00", "18:00", 2, "Weekend rush", "front"),
+                (week, "Sun", "11:00", "16:00", 1, "Short day", "front"),
+                (week, "Mon", "06:00", "14:00", 1, None, "back"),
+                (week, "Tue", "06:00", "14:00", 1, None, "back"),
+                (week, "Wed", "06:00", "14:00", 1, None, "back"),
+                (week, "Thu", "06:00", "14:00", 1, None, "back"),
+                (week, "Fri", "11:00", "20:00", 1, "Dinner prep + service", "back"),
+                (week, "Sat", "10:00", "20:00", 1, "Weekend covers", "back"),
+                (week, "Sun", "10:00", "16:00", 1, "Brunch", "back"),
+            ]
+            conn.executemany(
+                "INSERT INTO shifts (week_start, day, start_time, end_time, slots, note, area) "
+                "VALUES (?,?,?,?,?,?,?)", demo)
     conn.commit()
     conn.close()
 
@@ -197,6 +232,32 @@ def shift_hours(s, e):
     sh, sm = map(int, s.split(":"))
     eh, em = map(int, e.split(":"))
     return (eh * 60 + em - sh * 60 - sm) / 60.0
+
+
+def assignment_block_reason(conn, uid, shift, exclude_shift_id=None):
+    """Return the rule preventing a user from working a shift, if any."""
+    if uid in unavailable_uids(conn, shift):
+        return "unavailable"
+    rows = conn.execute(
+        "SELECT s.id, s.day, s.start_time, s.end_time FROM assignments a "
+        "JOIN shifts s ON s.id=a.shift_id WHERE a.user_id=? AND s.week_start=? "
+        "AND a.status NOT IN ('sick','swap_requested') AND s.id!=?",
+        (uid, shift["week_start"], exclude_shift_id or -1)).fetchall()
+    cap_row = conn.execute("SELECT weekly_hours FROM users WHERE id=?", (uid,)).fetchone()
+    if not cap_row:
+        return "unavailable"
+    if sum(shift_hours(r["start_time"], r["end_time"]) for r in rows) + \
+            shift_hours(shift["start_time"], shift["end_time"]) > (cap_row[0] or 40):
+        return "hours"
+    days = {r["day"] for r in rows}
+    if shift["day"] not in days and len(days) >= 7 - MIN_DAYS_OFF:
+        return "days"
+    for r in rows:
+        if r["day"] == shift["day"] and \
+                shift["start_time"] < r["end_time"] and \
+                r["start_time"] < shift["end_time"]:
+            return "overlap"
+    return None
 
 
 def priority_key(user_row):
@@ -239,13 +300,10 @@ def coverage_plan(conn, week, out_shift_id, out_uid):
         "WHERE s.week_start=? AND a.shift_id!=?",
         (week, out_shift_id)).fetchall()
     hours = defaultdict(float)
-    days = defaultdict(set)
     for r in arows:
-        if r["status"] == "sick":
+        if r["status"] in ("sick", "swap_requested"):
             continue
         hours[r["user_id"]] += shift_hours(r["start_time"], r["end_time"])
-        days[r["user_id"]].add(r["day"])
-    sh = shift_hours(shift["start_time"], shift["end_time"])
     # people already on this shift are not cover candidates (slots are 1
     # per person — UNIQUE(shift_id, user_id))
     already_on = {r["user_id"] for r in conn.execute(
@@ -255,27 +313,14 @@ def coverage_plan(conn, week, out_shift_id, out_uid):
         uid = u["id"]
         if uid in already_on:
             return False
-        vac = vacation_blocked_uids(conn).get(uid)
-        if vac is not None:
-            shift_date = date.fromisoformat(shift["week_start"]) + \
-                timedelta(days=DAYS.index(shift["day"]))
-            if date.fromisoformat(vac[0]) <= shift_date <= date.fromisoformat(vac[1]):
-                return False  # on approved vacation that day
-        cap = u["weekly_hours"] or 40
-        same_day = shift["day"] in days.get(uid, set())
-        if not same_day and len(days.get(uid, set())) >= 7 - MIN_DAYS_OFF:
-            return False  # would break the days-off rule
-        if hours.get(uid, 0) + sh > cap:
-            return False  # would break the hours cap
-        return True
+        return assignment_block_reason(conn, uid, shift) is None
 
     # 1. people who picked this shift but didn't get it — best in lineup.
-    # With out_uid=None (backfill pass) this prefers employees who picked
-    # the shift at ALL (even ones already holding it rank-first — they
-    # skip out below via already_on) before falling to the least-loaded.
+    # With out_uid=None (backfill pass) every picker is eligible to be
+    # considered; already assigned people are filtered by can_cover.
     picker_ids = {r["user_id"] for r in conn.execute(
-        "SELECT DISTINCT user_id FROM picks WHERE shift_id=? AND user_id!=?",
-        (out_shift_id, out_uid))}
+        "SELECT DISTINCT user_id FROM picks WHERE shift_id=?", (out_shift_id,))
+        if r["user_id"] != out_uid}
     for u in sorted((u for u in employees if u["id"] in picker_ids),
                     key=priority_key):
         if can_cover(u):
@@ -325,7 +370,7 @@ def apply_sick(conn, uid, shift_id, week=None):
     mgr = conn.execute("SELECT id FROM users WHERE role='manager'").fetchone()
     if mgr:
         notify(conn, mgr["id"], "conflict",
-               f"No cover found for {shift['day']} "
+               f"No cover available for {shift['day']} "
                f"{shift['start_time']}-{shift['end_time']} — needs manual coverage.")
     return False
 
@@ -345,13 +390,15 @@ def run_scheduler(week_start, actor="system"):
     explaining the fallback. When their whole list is exhausted they get a
     'nothing had room' notification.
 
-    Rebuild semantics: every call wipes the week's 'proposed' assignments
-    and recomputes from scratch, so it can be auto-triggered after any
-    pick save, roster change, or shift change. 'confirmed' (and pending
-    swap) assignments are kept and count against capacity.
+    Rebuild semantics: every call wipes the week's auto assignments and
+    recomputes them. Confirmed, approved switch, and arranged coverage
+    assignments stay fixed. Sick and pending swap rows leave capacity open.
     """
     conn = db()
     try:
+        conn.execute("BEGIN IMMEDIATE")
+        notification_start = conn.execute(
+            "SELECT COALESCE(MAX(id), 0) FROM notifications").fetchone()[0]
         shifts = conn.execute(
             "SELECT * FROM shifts WHERE week_start=? ORDER BY id", (week_start,)
         ).fetchall()
@@ -359,10 +406,28 @@ def run_scheduler(week_start, actor="system"):
         if not shift_ids:
             return 0
         ph = ",".join("?" * len(shift_ids))
+        shift_by_id = {s["id"]: s for s in shifts}
+        unavailable = {s["id"]: unavailable_uids(conn, s) for s in shifts}
+        previous = defaultdict(set)
+        previous_staffed = defaultdict(int)
+        for r in conn.execute(
+                f"SELECT shift_id, user_id FROM assignments WHERE shift_id IN ({ph}) "
+                "AND status NOT IN ('sick','swap_requested')", shift_ids):
+            previous[r["user_id"]].add(r["shift_id"])
+            previous_staffed[r["shift_id"]] += 1
+        for r in conn.execute(
+                f"SELECT shift_id, user_id FROM assignments WHERE shift_id IN ({ph}) "
+                "AND status NOT IN ('sick','swap_requested')", shift_ids).fetchall():
+            if r["user_id"] in unavailable[r["shift_id"]]:
+                conn.execute("DELETE FROM assignments WHERE shift_id=? AND user_id=?",
+                             (r["shift_id"], r["user_id"]))
         picks = conn.execute(
             f"SELECT * FROM picks WHERE shift_id IN ({ph})", shift_ids).fetchall()
         users = {u["id"]: u for u in conn.execute(
             "SELECT * FROM users WHERE role='employee'")}
+        prior_conflicts = {r["user_id"] for r in conn.execute(
+            "SELECT DISTINCT user_id FROM notifications WHERE id<=? AND kind='conflict'",
+            (notification_start,))}
 
         # confirmed / pending-swap / manager-approved-switch assignments
         # are fixed: keep the rows and seed the in-memory state with them
@@ -371,14 +436,11 @@ def run_scheduler(week_start, actor="system"):
         # higher-priority pick can displace an earlier lower-priority one.)
         fixed = conn.execute(
             f"SELECT shift_id, user_id FROM assignments WHERE shift_id IN ({ph}) "
-            "AND status IN ('confirmed', 'swap_requested')", shift_ids).fetchall()
-        # manager-approved switches get a 'switch_fixed' tag row (status=
-        # 'switch_fixed' until the next manual touch): fixed like confirmed
-        # but rendered as 'scheduled'. Seed from a helper view so both the
-        # tag and normal confirmed behave identically in capacity math.
+            "AND status='confirmed'", shift_ids).fetchall()
+        # Approved switches and arranged cover stay fixed on rebuild.
         fixed += conn.execute(
             f"SELECT shift_id, user_id FROM assignments WHERE shift_id IN ({ph}) "
-            "AND status='switch_fixed'", shift_ids).fetchall()
+            "AND status IN ('switch_fixed','coverage_fixed')", shift_ids).fetchall()
         conn.execute(
             f"DELETE FROM assignments WHERE shift_id IN ({ph}) AND "
             "status IN ('proposed', 'notified')", shift_ids)
@@ -400,16 +462,14 @@ def run_scheduler(week_start, actor="system"):
                 user_hours[r["user_id"]] += shift_hours_map[r["shift_id"]]
                 user_assignments[r["user_id"]].append((r["shift_id"], True))
 
-        # 'sick' rows survive the wipe (they're neither fixed nor deletable):
-        # the out-sick employee keeps the row so they don't get re-claimed
-        # onto that same shift, but it does NOT fill capacity and does NOT
-        # count toward their hours or working days.
+        # Sick and unresolved swap rows prevent the same employee from being
+        # reclaimed, while leaving the slot open for coverage.
         sick_rows = conn.execute(
             f"SELECT shift_id, user_id FROM assignments WHERE shift_id IN ({ph}) "
-            "AND status='sick'", shift_ids).fetchall()
+            "AND status IN ('sick','swap_requested')", shift_ids).fetchall()
         for r in sick_rows:
             if r["user_id"] in users:
-                user_assignments[r["user_id"]].append((r["shift_id"], "sick"))
+                user_assignments[r["user_id"]].append((r["shift_id"], "absent"))
 
         # defensive: ignore picks belonging to non-employees (e.g. stale
         # rows created before the manager role check existed)
@@ -430,7 +490,6 @@ def run_scheduler(week_start, actor="system"):
         # shifts (and vice versa) are ignored — the two houses run as
         # two separate schedules.
         priority = lambda uid: priority_key(users[uid])
-        vac_blocked = vacation_blocked_uids(conn)
         my_area = {uid: users[uid]["station"] for uid in users}
         eligible = lambda uid, sid: (sid in area_of and
                                      my_area[uid] == area_of[sid])
@@ -451,31 +510,21 @@ def run_scheduler(week_start, actor="system"):
             for _, uid, sid in claimants:
                 if sid in [a[0] for a in user_assignments[uid]]:
                     continue
-                cap = users[uid]["weekly_hours"]
-                if user_hours[uid] + shift_hours_map[sid] > cap:
+                reason = assignment_block_reason(conn, uid, shift_by_id[sid])
+                if reason == "hours":
                     if actor == "system":
                         notify(conn, uid, "conflict",
                                f"Passing on {shift_by_id[sid]['day']} — it would put "
-                               f"you over your {cap}h weekly cap.")
+                               f"you over your {users[uid]['weekly_hours']}h weekly cap.")
                     continue
-                # days-off guard: max 5 distinct working days per week
-                # (two shifts on the same day don't add a second working day)
-                already_days = {shift_by_id[s]["day"] for s, _ in user_assignments[uid]}
-                if shift_by_id[sid]["day"] not in already_days and \
-                        len(already_days) + 1 > 7 - MIN_DAYS_OFF:
+                if reason == "days":
                     if actor == "system":
                         notify(conn, uid, "conflict",
                                f"Passing on {shift_by_id[sid]['day']} — you need "
                                f"at least {MIN_DAYS_OFF} days off this week.")
                     continue
-                # vacation guard: never assign a shift whose date falls
-                # inside the employee's approved vacation range
-                vac = vac_blocked.get(uid)
-                if vac is not None:
-                    shift_date = date.fromisoformat(week_start) + \
-                        timedelta(days=DAYS.index(shift_by_id[sid]["day"]))
-                    if date.fromisoformat(vac[0]) <= shift_date <= date.fromisoformat(vac[1]):
-                        continue
+                if reason:
+                    continue
                 if assigned[sid] < capacity[sid]:
                     assigned[sid] += 1
                     user_hours[uid] += shift_hours_map[sid]
@@ -508,10 +557,17 @@ def run_scheduler(week_start, actor="system"):
                         mgr = conn.execute(
                             "SELECT id FROM users WHERE role='manager'").fetchone()
                         if mgr:
-                            notify(conn, mgr["id"], "conflict",
-                                   f"No cover available for {s['day']} "
-                                   f"{s['start_time']}-{s['end_time']} — "
-                                   "needs manual coverage.")
+                            prior_alert = conn.execute(
+                                "SELECT 1 FROM notifications WHERE user_id=? "
+                                "AND shift_id=? AND kind='conflict' AND "
+                                "message LIKE 'No cover available%' LIMIT 1",
+                                (mgr["id"], s["id"])).fetchone()
+                            if previous_staffed[s["id"]] >= capacity[s["id"]] \
+                                    or not prior_alert:
+                                notify(conn, mgr["id"], "conflict",
+                                       f"No cover available for {s['day']} "
+                                       f"{s['start_time']}-{s['end_time']} — "
+                                       "needs manual coverage.", s["id"])
                         break
                     # record + notify (hours/days tracking stays DB-accurate
                     # via the next build; insert directly to assignments)
@@ -530,23 +586,35 @@ def run_scheduler(week_start, actor="system"):
                            f"{s['start_time']}-{s['end_time']} (covering an "
                            "open slot).")
 
+        # Once a replacement fills an unresolved swap's slot, clear the
+        # original holder and close the request.
+        for s in shifts:
+            if assigned[s["id"]] < capacity[s["id"]]:
+                continue
+            for row in conn.execute(
+                    "SELECT user_id FROM assignments WHERE shift_id=? "
+                    "AND status='swap_requested'", (s["id"],)).fetchall():
+                conn.execute("DELETE FROM assignments WHERE shift_id=? AND user_id=?",
+                             (s["id"], row["user_id"]))
+                conn.execute("UPDATE requests SET status='approved_ok' WHERE "
+                             "kind='swap' AND status='approved' AND shift_id=? "
+                             "AND user_id=?", (s["id"], row["user_id"]))
+                notify(conn, row["user_id"], "assignment",
+                       f"Swap covered for {s['day']} {s['start_time']}-{s['end_time']}.")
+
         # wrap-up notifications — only for employees whose schedule changed
         # (an auto-rebuild shouldn't spam unchanged schedules)
-        got_sets = {uid: {s for s, _ in user_assignments[uid]}
-                    for uid in user_prefs}
         for uid, prefs in user_prefs.items():
             u = users.get(uid)
             if not u:
                 continue
-            got = sorted(got_sets[uid])
-            prev = conn.execute(
-                "SELECT shift_id FROM assignments WHERE user_id=? AND status='notified'",
-                (uid,)).fetchall()
-            prev_set = {r["shift_id"] for r in prev}
-            if got and got == sorted(prev_set):
-                continue  # unchanged since last auto-build, no re-notify
+            got = {r["shift_id"] for r in conn.execute(
+                f"SELECT shift_id FROM assignments WHERE user_id=? AND shift_id IN ({ph}) "
+                "AND status NOT IN ('sick','swap_requested')", (uid, *shift_ids))}
+            if got == previous[uid]:
+                continue
             if got:
-                days = ", ".join(shift_by_id[s]["day"] for s in got)
+                days = ", ".join(shift_by_id[s]["day"] for s in sorted(got))
                 notify(conn, uid, "assignment",
                        f"Schedule posted: you're on {days} this week.")
             else:
@@ -559,6 +627,15 @@ def run_scheduler(week_start, actor="system"):
         conn.execute(f"""
             UPDATE assignments SET status='notified'
             WHERE shift_id IN ({ph}) AND status='proposed'""", shift_ids)
+        for uid in users:
+            current = {r["shift_id"] for r in conn.execute(
+                f"SELECT shift_id FROM assignments WHERE user_id=? "
+                f"AND shift_id IN ({ph}) "
+                "AND status NOT IN ('sick','swap_requested')",
+                (uid, *shift_ids))}
+            if current == previous[uid] and (current or uid in prior_conflicts):
+                conn.execute("DELETE FROM notifications WHERE user_id=? AND id>?",
+                             (uid, notification_start))
         conn.commit()
         return len(picks)
     finally:
@@ -570,10 +647,10 @@ def run_scheduler(week_start, actor="system"):
 def login():
     if request.method == "POST":
         conn = db()
-        u = conn.execute("SELECT * FROM users WHERE username=? AND password=?",
-                         (request.form["username"], request.form["password"])).fetchone()
+        u = conn.execute("SELECT * FROM users WHERE username=?",
+                         (request.form.get("username", ""),)).fetchone()
         conn.close()
-        if u:
+        if u and check_password_hash(u["password"], request.form.get("password", "")):
             session.update(uid=u["id"], role=u["role"], name=u["name"])
             return redirect(url_for("dashboard"))
         flash("Wrong username or password")
@@ -584,6 +661,32 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+@app.route("/account/password", methods=["GET", "POST"])
+@login_required()
+def change_password():
+    if request.method == "POST":
+        old_password = request.form.get("old_password", "")
+        new_password = request.form.get("new_password", "")
+        if len(new_password) < 12:
+            flash("Use a new password of at least 12 characters.")
+            return redirect(url_for("change_password"))
+        conn = db()
+        user = conn.execute("SELECT password FROM users WHERE id=?",
+                            (session["uid"],)).fetchone()
+        if not user or not check_password_hash(user["password"], old_password):
+            conn.close()
+            flash("Current password is incorrect.")
+            return redirect(url_for("change_password"))
+        conn.execute("UPDATE users SET password=? WHERE id=?",
+                     (generate_password_hash(new_password), session["uid"]))
+        conn.commit()
+        conn.close()
+        session.clear()
+        flash("Password changed. Sign in again.")
+        return redirect(url_for("login"))
+    return render_template("password.html")
 
 
 @app.route("/")
@@ -611,7 +714,7 @@ def dashboard():
     roster = defaultdict(list)
     for r in conn.execute(
             "SELECT a.shift_id, u.name FROM assignments a JOIN users u ON u.id=a.user_id "
-            "WHERE a.status != 'sick'"):
+            "WHERE a.status NOT IN ('sick','swap_requested')"):
         roster[r["shift_id"]].append(r["name"])
     notifs = conn.execute(
         "SELECT * FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 20",
@@ -641,20 +744,20 @@ def pick():
     missing = []
     for sid in week_shifts:
         r = request.form.get(f"rank_{sid}")
-        if r and r.isdigit() and 1 <= int(r) <= 7:
+        if r and r.isdigit() and 1 <= int(r) <= len(week_shifts):
             ranked.append((int(r), int(sid)))
         else:
             missing.append(sid)
     if missing:
         conn.close()
-        flash("Rank ALL seven days (1 = top choice) — every day needs a "
+        flash("Rank ALL shifts (1 = top choice) — every shift needs a "
               "backup so any shift can be covered if plans change.")
         return redirect(url_for("dashboard"))
-    # ranks must be 1..7 with no gaps or duplicates
+    # ranks must be 1..N with no gaps or duplicates
     if sorted(int(r) for r, _ in ranked) != list(range(1, len(week_shifts) + 1)):
         conn.close()
         flash("Use each rank 1–" + str(len(week_shifts)) + " exactly once "
-              "(1 = top choice) so every day has a backup.")
+              "(1 = top choice) so every shift has a backup.")
         return redirect(url_for("dashboard"))
     conn.execute("DELETE FROM picks WHERE user_id=?", (uid,))
     for rank, sid in ranked:
@@ -672,12 +775,7 @@ def pick():
 @app.route("/swap/<int:shift_id>", methods=["POST"])
 @login_required()
 def swap(shift_id):
-    """Employee requests a swap: the same coverage criteria as sick calls
-    assign a replacement automatically — no manager wait. On success the
-    requester's assignment AND pick are deleted (they never wanted the
-    shift) and the swap is logged for the manager; on failure the row
-    becomes 'swap_requested' (fixed in rebuilds, doesn't fill capacity)
-    and the manager is alerted to cover it by hand."""
+    """Arrange an eligible cover or leave the slot open for manager review."""
     conn = db()
     uid = session["uid"]
     a = conn.execute(
@@ -700,7 +798,7 @@ def swap(shift_id):
             "INSERT OR IGNORE INTO assignments (shift_id, user_id) VALUES (?,?)",
             (shift_id, cover_uid))
         conn.execute(
-            "UPDATE assignments SET status='notified' WHERE shift_id=? AND user_id=? "
+            "UPDATE assignments SET status='coverage_fixed' WHERE shift_id=? AND user_id=? "
             "AND status='proposed'", (shift_id, cover_uid))
         conn.execute(
             "INSERT INTO requests (user_id, kind, shift_id, status, created_at) "
@@ -756,47 +854,30 @@ def request_vacation():
     if ve < vs:
         flash("Vacation end must be on or after the start.")
         return redirect(url_for("dashboard"))
-    conn = db()
-    uid = session["uid"]
     now = date.today()
     if vs < now:
         flash("Vacation can't start in the past.")
-        conn.close()
         return redirect(url_for("dashboard"))
+    conn = db()
+    uid = session["uid"]
     conn.execute(
         "INSERT INTO requests (user_id, kind, vacation_start, vacation_end, created_at) "
         "VALUES (?,?,?,?,?)",
         (uid, "vacation", vs.isoformat(), ve.isoformat(),
          datetime.now().isoformat(timespec="seconds")))
-    # drop this week's shifts that fall inside the range (future weeks are
-    # handled at rollover — everything is pinned to the current week now)
-    dropped = conn.execute(
-        "SELECT a.shift_id FROM assignments a JOIN shifts s ON s.id=a.shift_id "
-        "WHERE a.user_id=? AND a.status NOT IN ('sick','swap_requested')",
-        (uid,)).fetchall()
-    n_dropped = 0
-    for r in dropped:
-        s = conn.execute("SELECT day, week_start FROM shifts WHERE id=?",
-                         (r["shift_id"],)).fetchone()
-        if not s:
-            continue
-        d = date.fromisoformat(s["week_start"]) + timedelta(days=DAYS.index(s["day"]))
-        if vs <= d <= ve:
-            conn.execute("DELETE FROM assignments WHERE shift_id=? AND user_id=?",
-                         (r["shift_id"], uid))
-            conn.execute("DELETE FROM picks WHERE user_id=? AND shift_id=?",
-                         (r["shift_id"], uid))
-            n_dropped += 1
+    affected_weeks = [r["week_start"] for r in conn.execute(
+        "SELECT DISTINCT week_start FROM shifts WHERE week_start>=? AND week_start<=?",
+        (monday_of(vs).isoformat(), ve.isoformat()))]
     mgr = conn.execute("SELECT id FROM users WHERE role='manager'").fetchone()
     if mgr:
         notify(conn, mgr["id"], "swap_request",
                f"{session['name']} requested vacation {vs.isoformat()} to "
-               f"{ve.isoformat()} ({n_dropped} shift(s) dropped this week).")
+               f"{ve.isoformat()}.")
     conn.commit()
     conn.close()
-    flash(f"Vacation requested {vs.isoformat()} to {ve.isoformat()}"
-          + (f" — {n_dropped} shift(s) freed for coverage." if n_dropped else "."))
-    run_scheduler(monday_of(date.today()).isoformat())
+    for week in affected_weeks:
+        run_scheduler(week)
+    flash(f"Vacation requested {vs.isoformat()} to {ve.isoformat()}.")
     return redirect(url_for("dashboard"))
 
 
@@ -812,27 +893,26 @@ def request_day_off():
     conn = db()
     uid = session["uid"]
     week = monday_of(date.today()).isoformat()
+    existing = conn.execute(
+        "SELECT 1 FROM requests WHERE user_id=? AND kind='day_off' "
+        "AND week_start=? AND day=? AND status IN ('approved', 'approved_ok')",
+        (uid, week, day)).fetchone()
+    if existing:
+        conn.close()
+        flash(f"You already have an active request for {day} off.")
+        return redirect(url_for("dashboard"))
     conn.execute(
-        "INSERT INTO requests (user_id, kind, day, created_at) VALUES (?,?,?,?)",
-        (uid, "day_off", day, datetime.now().isoformat(timespec="seconds")))
-    # drop any picks + assignments the employee holds on that weekday
-    dropped = conn.execute(
-        "SELECT a.shift_id, s.day FROM assignments a JOIN shifts s ON s.id=a.shift_id "
-        "WHERE a.user_id=? AND s.week_start=? AND s.day=? AND a.status NOT IN "
-        "('confirmed','swap_requested')", (uid, week, day)).fetchall()
-    for r in dropped:
-        conn.execute("DELETE FROM assignments WHERE user_id=? AND shift_id=?",
-                     (uid, r["shift_id"]))
-        conn.execute("DELETE FROM picks WHERE user_id=? AND shift_id=?",
-                     (uid, r["shift_id"]))
+        "INSERT INTO requests (user_id, kind, day, week_start, created_at) "
+        "VALUES (?,?,?,?,?)",
+        (uid, "day_off", day, week, datetime.now().isoformat(timespec="seconds")))
     mgr = conn.execute("SELECT id FROM users WHERE role='manager'").fetchone()
     if mgr:
         notify(conn, mgr["id"], "swap_request",
                f"{session['name']} requested {day} off.")
     conn.commit()
     conn.close()
-    flash(f"Day off requested for {day}.")
     run_scheduler(week)
+    flash(f"Day off requested for {day}.")
     return redirect(url_for("dashboard"))
 
 
@@ -862,16 +942,19 @@ def request_switch(shift_id):
     conn = db()
     uid = session["uid"]
     mine = conn.execute(
-        "SELECT id FROM assignments WHERE shift_id=? AND user_id=?",
+        "SELECT a.id, s.week_start FROM assignments a JOIN shifts s ON s.id=a.shift_id "
+        "WHERE a.shift_id=? AND a.user_id=? "
+        "AND a.status NOT IN ('sick','swap_requested')",
         (shift_id, uid)).fetchone()
     if not mine:
         conn.close()
         flash("That's not one of your shifts.")
         return redirect(url_for("dashboard"))
     target_row = conn.execute("SELECT * FROM shifts WHERE id=?", (int(target),)).fetchone()
-    if not target_row:
+    if not target_row or target_row["id"] == shift_id or \
+            target_row["week_start"] != mine["week_start"]:
         conn.close()
-        flash("Target shift not found.")
+        flash("Choose another shift in the same week.")
         return redirect(url_for("dashboard"))
     me = conn.execute("SELECT station FROM users WHERE id=?", (uid,)).fetchone()
     if me and target_row["area"] != me["station"]:
@@ -910,11 +993,12 @@ def manager():
         "JOIN users u ON u.id=p.user_id JOIN shifts s ON s.id=p.shift_id "
         "WHERE s.week_start=? ORDER BY u.name, p.rank", (week,)).fetchall()
     assigned = defaultdict(list)
-    label = {"swap_requested": "swap requested", "notified": "scheduled",
-             "sick": "out sick", "switch_fixed": "scheduled (switched)"}
+    label = {"notified": "scheduled", "switch_fixed": "scheduled (switched)",
+             "coverage_fixed": "scheduled (covering)"}
     for r in conn.execute(
             "SELECT a.shift_id, u.name, a.status FROM assignments a "
-            "JOIN users u ON u.id=a.user_id WHERE a.status NOT IN ('sick')"):
+            "JOIN users u ON u.id=a.user_id "
+            "WHERE a.status NOT IN ('sick','swap_requested')"):
         assigned[r["shift_id"]].append(f"{r['name']} ({label.get(r['status'], r['status'])})")
     unassigned = conn.execute(
         "SELECT DISTINCT u.name FROM users u WHERE u.role='employee' AND u.id NOT IN "
@@ -936,18 +1020,31 @@ def add_shift():
     area = request.form.get("area", "front")
     if area not in ("front", "back"):
         area = "front"
+    day = request.form.get("day", "")
+    start = request.form.get("start", "")
+    end = request.form.get("end", "")
+    try:
+        start_time = datetime.strptime(start, "%H:%M").time()
+        end_time = datetime.strptime(end, "%H:%M").time()
+        slots = int(request.form.get("slots", ""))
+    except ValueError:
+        flash("Enter a valid shift time and slot count.")
+        return redirect(url_for("manager"))
+    if day not in DAYS or end_time <= start_time or not 1 <= slots <= 10:
+        flash("Choose a day, an end time after the start, and 1–10 slots.")
+        return redirect(url_for("manager"))
     conn = db()
     conn.execute(
         "INSERT INTO shifts (week_start, day, start_time, end_time, slots, note, area) "
         "VALUES (?,?,?,?,?,?,?)",
-        (monday_of(date.today()).isoformat(), request.form["day"],
-         request.form["start"], request.form["end"], int(request.form["slots"]),
+        (monday_of(date.today()).isoformat(), day,
+         start_time.strftime("%H:%M"), end_time.strftime("%H:%M"), slots,
          request.form.get("note") or None, area))
     for emp in conn.execute(
             "SELECT id FROM users WHERE role='employee' AND station=?", (area,)):
         notify(conn, emp["id"], "new_schedule",
-               f"New {request.form['day']} shift posted ({request.form['start']}-"
-               f"{request.form['end']}) for your area — submit your picks!")
+               f"New {day} shift posted ({start}-{end})"
+               f" for your area — submit your picks!")
     conn.commit()
     conn.close()
     # auto-rebuild: new shift changes capacity -> re-run the lineup
@@ -960,13 +1057,21 @@ def add_shift():
 @login_required(role="manager")
 def delete_shift(shift_id):
     conn = db()
+    shift = conn.execute("SELECT week_start FROM shifts WHERE id=?",
+                         (shift_id,)).fetchone()
+    conn.execute(
+        "UPDATE requests SET status='superseded' WHERE "
+        "(shift_id=? OR target_shift_id=?) AND "
+        "kind IN ('swap','switch','manager_unassign','sick')",
+        (shift_id, shift_id))
     conn.execute("DELETE FROM picks WHERE shift_id=?", (shift_id,))
     conn.execute("DELETE FROM assignments WHERE shift_id=?", (shift_id,))
     conn.execute("DELETE FROM shifts WHERE id=?", (shift_id,))
     conn.commit()
     conn.close()
     # auto-rebuild: deleted shift frees people -> re-run the lineup
-    run_scheduler(monday_of(date.today()).isoformat())
+    if shift:
+        run_scheduler(shift["week_start"])
     return redirect(url_for("manager"))
 
 
@@ -1002,7 +1107,8 @@ def conflicts():
             continue
         assigned_rows = conn.execute(
             "SELECT u.name, u.id, a.status FROM assignments a "
-            "JOIN users u ON u.id=a.user_id WHERE a.shift_id=?", (s["id"],)).fetchall()
+            "JOIN users u ON u.id=a.user_id WHERE a.shift_id=? "
+            "AND a.status NOT IN ('sick','swap_requested')", (s["id"],)).fetchall()
         assigned_ids = {r["id"] for r in assigned_rows}
         contested = [c for c in claimants if c["user_id"] not in assigned_ids]
         if len(assigned_rows) >= s["slots"] and not contested:
@@ -1054,14 +1160,23 @@ def conflicts():
 @login_required(role="manager")
 def unassign(shift_id, user_id):
     conn = db()
-    conn.execute("DELETE FROM assignments WHERE shift_id=? AND user_id=?",
-                 (shift_id, user_id))
-    notify(conn, user_id, "conflict",
-           "One of your shifts was reassigned by the manager — check your schedule.")
+    shift = conn.execute("SELECT week_start FROM shifts WHERE id=?",
+                         (shift_id,)).fetchone()
+    deleted = conn.execute("DELETE FROM assignments WHERE shift_id=? AND user_id=?",
+                           (shift_id, user_id)).rowcount
+    if deleted:
+        conn.execute(
+            "INSERT INTO requests (user_id, kind, shift_id, status, created_at) "
+            "VALUES (?,?,?,?,?)",
+            (user_id, "manager_unassign", shift_id, "approved_ok",
+             datetime.now().isoformat(timespec="seconds")))
+        notify(conn, user_id, "conflict",
+               "One of your shifts was reassigned by the manager — check your schedule.")
     conn.commit()
     conn.close()
     # auto-rebuild: freed slot -> re-run the lineup so the next-in-line gets it
-    run_scheduler(monday_of(date.today()).isoformat())
+    if deleted and shift:
+        run_scheduler(shift["week_start"])
     return redirect(url_for("conflicts"))
 
 
@@ -1072,7 +1187,7 @@ def requests():
     conn = db()
     rows = conn.execute(
         "SELECT r.*, u.name FROM requests r JOIN users u ON u.id=r.user_id "
-        "ORDER BY r.id DESC").fetchall()
+        "WHERE r.kind!='manager_unassign' ORDER BY r.id DESC").fetchall()
     items = []
     for r in rows:
         item = dict(r)
@@ -1104,19 +1219,62 @@ def approve_request(req_id):
         conn.execute("UPDATE requests SET status='approved_ok' WHERE id=?", (req_id,))
         notify(conn, r["user_id"], "assignment",
                f"Your day-off request for {r['day']} was approved.")
+    elif r["kind"] == "vacation":
+        conn.execute("UPDATE requests SET status='approved_ok' WHERE id=?", (req_id,))
+        notify(conn, r["user_id"], "assignment",
+               f"Your vacation request for {r['vacation_start']} to "
+               f"{r['vacation_end']} was approved.")
+    elif r["kind"] == "swap":
+        shift = conn.execute("SELECT * FROM shifts WHERE id=?", (r["shift_id"],)).fetchone()
+        pending = conn.execute(
+            "SELECT 1 FROM assignments WHERE shift_id=? AND user_id=? "
+            "AND status='swap_requested'", (r["shift_id"], r["user_id"])).fetchone()
+        cover_uid = (coverage_plan(conn, shift["week_start"], shift["id"], r["user_id"])
+                     if shift and pending else None)
+        if cover_uid is None:
+            conn.close()
+            flash("No eligible coverer is available for that swap.")
+            return redirect(url_for("requests"))
+        conn.execute("DELETE FROM assignments WHERE shift_id=? AND user_id=?",
+                     (shift["id"], r["user_id"]))
+        conn.execute("DELETE FROM picks WHERE shift_id=? AND user_id=?",
+                     (shift["id"], r["user_id"]))
+        conn.execute(
+            "INSERT INTO assignments (shift_id, user_id, status) VALUES (?,?,?)",
+            (shift["id"], cover_uid, "coverage_fixed"))
+        conn.execute("UPDATE requests SET status='approved_ok' WHERE id=?", (req_id,))
+        notify(conn, cover_uid, "assignment",
+               f"Coverage: you're now on {shift['day']} "
+               f"{shift['start_time']}-{shift['end_time']} (covering a swap).")
+        notify(conn, r["user_id"], "assignment",
+               f"Your swap for {shift['day']} {shift['start_time']}-{shift['end_time']} was covered.")
+        conn.commit()
+        conn.close()
+        run_scheduler(shift["week_start"])
+        flash("Swap covered.")
+        return redirect(url_for("requests"))
     elif r["kind"] == "switch" and r["shift_id"] and r["target_shift_id"]:
         target = conn.execute("SELECT * FROM shifts WHERE id=?",
                               (r["target_shift_id"],)).fetchone()
-        if target:
+        source = conn.execute(
+            "SELECT s.* FROM assignments a JOIN shifts s ON s.id=a.shift_id "
+            "WHERE a.user_id=? AND a.shift_id=? AND a.status "
+            "NOT IN ('sick','swap_requested')",
+            (r["user_id"], r["shift_id"])).fetchone()
+        if target and source and target["week_start"] == source["week_start"] \
+                and target["id"] != source["id"]:
             staffed = conn.execute(
-                "SELECT COUNT(*) c FROM assignments WHERE shift_id=? AND status!='sick'",
+                "SELECT COUNT(*) c FROM assignments WHERE shift_id=? "
+                "AND status NOT IN ('sick','swap_requested')",
                 (r["target_shift_id"],)).fetchone()["c"]
-            if staffed >= target["slots"]:
+            block_reason = assignment_block_reason(
+                conn, r["user_id"], target, exclude_shift_id=source["id"])
+            if staffed >= target["slots"] or block_reason:
                 conn.execute("UPDATE requests SET status='denied' WHERE id=?",
                              (req_id,))
                 notify(conn, r["user_id"], "conflict",
                        f"Switch declined: {target['day']} "
-                       f"{target['start_time']}-{target['end_time']} is already full.")
+                       f"{target['start_time']}-{target['end_time']} is unavailable.")
             else:
                 conn.execute("DELETE FROM assignments WHERE shift_id=? AND user_id=?",
                              (r["shift_id"], r["user_id"]))
@@ -1143,13 +1301,14 @@ def approve_request(req_id):
         conn.close()
         # rebuild after a switch: the approved row is 'switch_fixed' so the
         # lineup won't undo it, and the vacated old slot gets backfilled
-        run_scheduler(monday_of(date.today()).isoformat())
-        flash("Switch approved.")
+        run_scheduler(source["week_start"] if source else monday_of(date.today()).isoformat())
+        flash("Switch request reviewed.")
         return redirect(url_for("requests"))
     conn.commit()
     conn.close()
     # freed slot from the switch/day-off -> next-in-line gets covered automatically
-    run_scheduler(monday_of(date.today()).isoformat())
+    if r["kind"] == "day_off":
+        run_scheduler(r["week_start"] or monday_of(date.today()).isoformat())
     flash("Request approved.")
     return redirect(url_for("requests"))
 
@@ -1158,15 +1317,41 @@ def approve_request(req_id):
 @login_required(role="manager")
 def deny_request(req_id):
     conn = db()
-    conn.execute("UPDATE requests SET status='denied' WHERE id=? AND status='approved'",
-                 (req_id,))
     r = conn.execute("SELECT * FROM requests WHERE id=?", (req_id,)).fetchone()
-    if r and r["status"] == "denied":
-        notify(conn, r["user_id"], "conflict",
-               "One of your requests was declined by the manager — check the "
-               "Requests page or talk to them.")
+    if not r or r["status"] != "approved":
+        conn.close()
+        flash("Request not found or already handled.")
+        return redirect(url_for("requests"))
+    conn.execute("UPDATE requests SET status='denied' WHERE id=?", (req_id,))
+    if r["kind"] == "swap":
+        conn.execute(
+            "UPDATE assignments SET status='confirmed' WHERE shift_id=? "
+            "AND user_id=? AND status='swap_requested'",
+            (r["shift_id"], r["user_id"]))
+    notify(conn, r["user_id"], "conflict",
+           "One of your requests was declined by the manager — check the "
+           "Requests page or talk to them.")
     conn.commit()
     conn.close()
+    if r["kind"] == "day_off":
+        run_scheduler(r["week_start"] or monday_of(date.today()).isoformat())
+    elif r["kind"] == "vacation":
+        conn = db()
+        weeks = [w["week_start"] for w in conn.execute(
+            "SELECT DISTINCT week_start FROM shifts WHERE week_start>=? "
+            "AND week_start<=?",
+            (monday_of(date.fromisoformat(r["vacation_start"])).isoformat(),
+             r["vacation_end"]))]
+        conn.close()
+        for week in weeks:
+            run_scheduler(week)
+    elif r["kind"] == "swap":
+        conn = db()
+        shift = conn.execute("SELECT week_start FROM shifts WHERE id=?",
+                             (r["shift_id"],)).fetchone()
+        conn.close()
+        if shift:
+            run_scheduler(shift["week_start"])
     flash("Request denied.")
     return redirect(url_for("requests"))
 
@@ -1180,7 +1365,8 @@ def calendar_days(conn, week, user_id):
     for s in shifts:
         rows = conn.execute(
             "SELECT a.status, a.user_id, u.name FROM assignments a "
-            "JOIN users u ON u.id=a.user_id WHERE a.shift_id=? AND a.status != 'sick'",
+            "JOIN users u ON u.id=a.user_id WHERE a.shift_id=? "
+            "AND a.status NOT IN ('sick','swap_requested')",
             (s["id"],)).fetchall()
         status = next((r["status"] for r in rows if r["user_id"] == user_id), None)
         by_day[s["day"]].append({
@@ -1223,36 +1409,97 @@ def calendar_view():
             if row:
                 uid = row["id"]
     view_user = conn.execute("SELECT name FROM users WHERE id=?", (uid,)).fetchone()
+    days = calendar_days(conn, week, uid)
     conn.close()
     d = date.fromisoformat(week)
     return render_template(
-        "calendar.html", days=calendar_days(db(), week, uid), week=week,
-        view_name=view_user["name"], employees=employees, view_id=uid,
+        "calendar.html", days=days, week=week,
+        view_name=view_user["name"] if view_user else session.get("name", ""),
+        employees=employees, view_id=uid,
         prev_week=(d - timedelta(days=7)).isoformat(),
         next_week=(d + timedelta(days=7)).isoformat(),
         this_week=monday_of(date.today()).isoformat())
 
 
 # ---------------- roster (employment type / seniority)
+@app.route("/manager/roster/add", methods=["POST"])
+@login_required(role="manager")
+def add_employee():
+    username = request.form.get("username", "").strip()
+    name = request.form.get("name", "").strip()
+    password = request.form.get("password", "")
+    employment_type = request.form.get("employment_type", "")
+    hired = request.form.get("hired_on", "").strip()
+    try:
+        weekly_hours = int(request.form.get("weekly_hours", ""))
+    except ValueError:
+        weekly_hours = 0
+    if not username or not name or len(password) < 12 or \
+            employment_type not in ("full_time", "part_time") or \
+            not 1 <= weekly_hours <= 168:
+        flash("Enter a name, username, password of at least 12 characters, "
+              "employment type, and valid weekly hours.")
+        return redirect(url_for("roster"))
+    if hired:
+        try:
+            date.fromisoformat(hired)
+        except ValueError:
+            flash("Enter a valid hire date.")
+            return redirect(url_for("roster"))
+    conn = db()
+    try:
+        conn.execute(
+            "INSERT INTO users (username, password, name, role, weekly_hours, "
+            "employment_type, hired_on) VALUES (?,?,?,?,?,?,?)",
+            (username, generate_password_hash(password), name, "employee",
+             weekly_hours, employment_type, hired or None))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        flash("That username is already in use.")
+    else:
+        flash("Employee added.")
+    finally:
+        conn.close()
+    return redirect(url_for("roster"))
+
+
 @app.route("/manager/roster", methods=["GET", "POST"])
 @login_required(role="manager")
 def roster():
     conn = db()
     if request.method == "POST":
-        for uid_row in conn.execute("SELECT id FROM users WHERE role='employee'"):
-            uid = uid_row["id"]
-            et = request.form.get(f"type_{uid}")
-            hired = request.form.get(f"hired_{uid}", "").strip()
-            cap = request.form.get(f"cap_{uid}", "").strip()
-            station = request.form.get(f"station_{uid}", "")
-            if station in ("front", "back"):
-                conn.execute("UPDATE users SET station=? WHERE id=?", (station, uid))
-            if et in ("full_time", "part_time"):
-                conn.execute("UPDATE users SET employment_type=? WHERE id=?", (et, uid))
-            conn.execute("UPDATE users SET hired_on=? WHERE id=?",
-                         (hired or None, uid))
-            if cap.isdigit():
-                conn.execute("UPDATE users SET weekly_hours=? WHERE id=?", (int(cap), uid))
+        updates = []
+        for row in conn.execute(
+                "SELECT id, employment_type, hired_on, weekly_hours, station"
+                " FROM users WHERE role='employee'"):
+            uid = row["id"]
+            # Fields absent from the post keep their current values; fields
+            # present are validated strictly before anything is written.
+            et = request.form.get(f"type_{uid}", row["employment_type"])
+            hired = request.form.get(f"hired_{uid}", row["hired_on"] or "").strip()
+            cap = request.form.get(f"cap_{uid}", str(row["weekly_hours"] or "")).strip()
+            station = request.form.get(f"station_{uid}", row["station"] or "front")
+            try:
+                if hired:
+                    date.fromisoformat(hired)
+                hours_cap = int(cap)
+            except ValueError:
+                conn.close()
+                flash("Enter a valid hire date and weekly hours cap.")
+                return redirect(url_for("roster"))
+            if et not in ("full_time", "part_time") or not 1 <= hours_cap <= 168:
+                conn.close()
+                flash("Choose an employment type and a cap from 1 to 168 hours.")
+                return redirect(url_for("roster"))
+            if station not in ("front", "back"):
+                conn.close()
+                flash("Choose a valid station (front/back).")
+                return redirect(url_for("roster"))
+            updates.append((et, hired or None, hours_cap, station, uid))
+        conn.executemany(
+            "UPDATE users SET employment_type=?, hired_on=?, weekly_hours=?,"
+            " station=? WHERE id=?",
+            updates)
         conn.commit()
         flash("Roster updated.")
         conn.close()
@@ -1267,5 +1514,6 @@ def roster():
 
 
 if __name__ == "__main__":
-    init_db()
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    init_db(seed_demo=os.environ.get("SHIFTWISE_DEMO_SEED") == "1")
+    app.run(host=os.environ.get("SHIFTWISE_HOST", "127.0.0.1"),
+            port=int(os.environ.get("SHIFTWISE_PORT", "5001")), debug=False)

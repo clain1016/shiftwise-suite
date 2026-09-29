@@ -2,24 +2,29 @@
 in-process run (zero network/LLM cost). Reseed -> 8x full-week picks ->
 10 conflict events incl. edge cases -> manager review -> audit."""
 import sys
+import os
+from pathlib import Path
 from datetime import date, timedelta
-sys.path.insert(0, "/home/cody/scheduler-mock")
+MOCKDIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(MOCKDIR))
 import app as appmod
 from mock_seed import seed
 
-appmod.DB_PATH = "/home/cody/scheduler-mock/mock.db"
-appmod.init_db()
+appmod.DB_PATH = Path(os.environ.get("SHIFTWISE_SCENARIO_DB_PATH", MOCKDIR / "mock.db"))
+appmod.init_db(seed_demo=True)
 seed(appmod)
-appmod.init_db()
+appmod.init_db(seed_demo=True)
 
 client = appmod.app.test_client()
 WEEK = appmod.monday_of(date.today()).isoformat()
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 EMPS = None
 
-def login(u):
+def login(u, password=None):
     client.get("/logout")
-    client.post("/login", data={"username": u, "password": u})
+    response = client.post("/login", data={"username": u, "password": password or u},
+                           follow_redirects=True)
+    assert b"Log out" in response.data, u
 
 def uid(u):
     c = appmod.db()
@@ -53,7 +58,8 @@ def schedule():
     rows = c.execute(
         "SELECT s.day, s.slots, COUNT(a.id) n, GROUP_CONCAT(u.name, ', ') names "
         "FROM shifts s LEFT JOIN assignments a ON a.shift_id=s.id "
-        "LEFT JOIN users u ON u.id=a.user_id AND a.status!='sick' "
+        "AND a.status NOT IN ('sick','swap_requested') "
+        "LEFT JOIN users u ON u.id=a.user_id "
         "WHERE s.week_start=? GROUP BY s.id", (WEEK,)).fetchall()
     c.close()
     return [(r["day"], r["n"], r["slots"], r["names"] or "-") for r in rows]
@@ -119,8 +125,7 @@ ve = vs + timedelta(days=6)
 r = client.post("/request/vacation",
                 data={"vac_start": vs.isoformat(), "vac_end": ve.isoformat()},
                 follow_redirects=True)
-print(f"  alex vacation {vs}..{ve}: flash="
-      f"{'saved' if b'acation' in r.data and b'ast' not in r.data else r.data} ")
+print(f"  alex vacation {vs}..{ve}: saved={b'Vacation requested' in r.data}")
 print("  alex now holds:", [x["day"] for x in my("alex")] or "nothing (all in range)")
 
 # ---------- 7. vacation, past-dated (rejected) ----------
@@ -137,7 +142,7 @@ login("sam")
 s_mine = my("sam")
 full = appmod.db().execute(
     "SELECT s.id, s.day FROM shifts s WHERE s.week_start=? AND (SELECT "
-    "COUNT(*) FROM assignments a WHERE a.shift_id=s.id AND a.status!='sick') "
+    "COUNT(*) FROM assignments a WHERE a.shift_id=s.id AND a.status NOT IN ('sick','swap_requested')) "
     ">= s.slots ORDER BY s.id LIMIT 1", (WEEK,)).fetchone()
 mine_ids = {x["id"] for x in s_mine}
 if full and full["id"] not in mine_ids:
@@ -146,7 +151,7 @@ if full and full["id"] not in mine_ids:
     login("manager")
     c = appmod.db()
     req = c.execute("SELECT id FROM requests WHERE kind='switch' AND "
-                    "status='pending' ORDER BY id DESC LIMIT 1").fetchone()
+                    "status='approved' ORDER BY id DESC LIMIT 1").fetchone()
     if req:
         client.post(f"/manager/requests/{req['id']}/approve", follow_redirects=True)
         row = c.execute("SELECT status FROM requests WHERE id=?", (req["id"],)).fetchone()
@@ -174,22 +179,18 @@ if j_mine:
 # ---------- 10. roster change ----------
 ph(10, "roster change: add new part-timer (casey), they pick all 7 days")
 login("manager")
-client.post("/manager/roster", data={
-    "username": "casey", "password": "casey", "name": "Casey Nguyen",
+client.post("/manager/roster/add", data={
+    "username": "casey", "password": "casey-private-passphrase", "name": "Casey Nguyen",
     "weekly_hours": "20", "employment_type": "part_time",
     "hired_on": date.today().isoformat()}, follow_redirects=True)
 c = appmod.db()
 row = c.execute("SELECT id FROM users WHERE username='casey'").fetchone()
-if not row:
-    # try the actual roster route shape
-    print("  casey add failed — checking route…")
-else:
-    c.close()
-    login("casey")
-    form = {f"rank_{sid_of(d)}": str(i + 1) for i, d in enumerate(DAYS)}
-    r = client.post("/pick", data=form, follow_redirects=True)
-    print("  casey picked all 7 days:",
-          b"Preferences saved" in r.data)
+assert row, "new employee was not added"
+c.close()
+login("casey", "casey-private-passphrase")
+form = {f"rank_{sid_of(d)}": str(i + 1) for i, d in enumerate(DAYS)}
+r = client.post("/pick", data=form, follow_redirects=True)
+print("  casey picked all 7 days:", b"Preferences saved" in r.data)
 c = appmod.db()
 casey_holds = c.execute("SELECT COUNT(*) c FROM assignments a JOIN users u ON "
                         "u.id=a.user_id WHERE u.username='casey'").fetchone()["c"]
@@ -207,7 +208,7 @@ sick = c.execute("SELECT u.username, s.day FROM assignments a JOIN users u ON "
 over = c.execute(
     "SELECT u.username, SUM(julianday(s2.end_time)-julianday(s2.start_time))*24 h "
     "FROM assignments a JOIN users u ON u.id=a.user_id JOIN shifts s2 ON "
-    "s2.id=a.shift_id WHERE a.status!='sick' AND s2.week_start=? GROUP BY a.user_id",
+    "s2.id=a.shift_id WHERE a.status NOT IN ('sick','swap_requested') AND s2.week_start=? GROUP BY a.user_id",
     (WEEK,)).fetchall()
 reqs = c.execute("SELECT kind, status, COUNT(*) n FROM requests GROUP BY kind, status").fetchall()
 c.close()

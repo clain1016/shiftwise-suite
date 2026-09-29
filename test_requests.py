@@ -4,11 +4,13 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import app as appmod
+from test_support import isolate_database
+_test_db = isolate_database(appmod)
 
 DB = appmod.DB_PATH
 if DB.exists():
     DB.unlink()
-appmod.init_db()
+appmod.init_db(seed_demo=True)
 client = appmod.app.test_client()
 
 def login(user, pw):
@@ -68,7 +70,7 @@ assert b"Day off requested" in r.data
 conn = appmod.db()
 gone = conn.execute(
     "SELECT 1 FROM assignments a JOIN shifts s ON s.id=a.shift_id "
-    "WHERE a.user_id=? AND s.day=? AND s.week_start=? AND a.status!='sick'",
+    "WHERE a.user_id=? AND s.day=? AND s.week_start=? AND a.status NOT IN ('sick','swap_requested')",
     (uid_for("sam"), "Mon", week)).fetchone()
 req = conn.execute("SELECT * FROM requests WHERE kind='day_off'").fetchone()
 mgr_notif = conn.execute(
@@ -114,7 +116,7 @@ cap_violations = conn.execute(
              - CAST(substr(s.start_time,1,2) AS REAL)*60 - CAST(substr(s.start_time,4,2) AS REAL))/60.0
          ELSE 0 END) h
        FROM users u
-       LEFT JOIN assignments a ON a.user_id=u.id AND a.status!='sick'
+       LEFT JOIN assignments a ON a.user_id=u.id AND a.status NOT IN ('sick','swap_requested')
        LEFT JOIN shifts s ON s.id=a.shift_id AND s.week_start=?
        WHERE u.role='employee' GROUP BY u.id""",
     (week,)).fetchall()
@@ -137,7 +139,7 @@ sam_shift = conn.execute(
 target_shift = conn.execute(
     "SELECT s.id FROM shifts s WHERE s.week_start=? AND s.id NOT IN "
     "(SELECT a.shift_id FROM assignments a WHERE a.user_id=?) AND "
-    "(SELECT COUNT(*) FROM assignments a WHERE a.shift_id=s.id AND a.status!='sick') < s.slots "
+    "(SELECT COUNT(*) FROM assignments a WHERE a.shift_id=s.id AND a.status NOT IN ('sick','swap_requested')) < s.slots "
     "AND s.area=(SELECT station FROM users WHERE username='sam') "
     "ORDER BY s.id LIMIT 1", (week, uid_for("sam"))).fetchone()
 conn.close()
@@ -150,8 +152,18 @@ if sam_shift and target_shift:
     req = conn.execute(
         "SELECT id FROM requests WHERE kind='switch' AND status='approved' "
         "AND user_id=?", (uid_for("sam"),)).fetchone()
+    target_row = conn.execute("SELECT * FROM shifts WHERE id=?",
+                              (target_shift["id"],)).fetchone()
+    block_reason = appmod.assignment_block_reason(
+        conn, uid_for("sam"), target_row, exclude_shift_id=sam_shift["id"])
+    target_staffed = conn.execute(
+        "SELECT COUNT(*) FROM assignments WHERE shift_id=? "
+        "AND status NOT IN ('sick','swap_requested')",
+        (target_shift["id"],)).fetchone()[0]
     conn.close()
     assert req, "switch request row missing"
+    expected_status = ("denied" if block_reason or target_staffed >= target_row["slots"]
+                       else "approved_ok")
     client.post("/logout")
     login("manager", "manager")
     r = client.get("/manager/requests")
@@ -160,25 +172,21 @@ if sam_shift and target_shift:
     conn = appmod.db()
     req_st = conn.execute("SELECT status FROM requests WHERE id=?",
                           (req["id"],)).fetchone()["status"]
+    assert req_st == expected_status, (req_st, expected_status, block_reason)
     now_on_target = conn.execute(
         "SELECT 1 FROM assignments WHERE shift_id=? AND user_id=?",
         (target_shift["id"], uid_for("sam"))).fetchone()
     not_on_old = conn.execute(
         "SELECT 1 FROM assignments WHERE shift_id=? AND user_id=?",
         (sam_shift["id"], uid_for("sam"))).fetchone()
-    staffed = conn.execute(
-        "SELECT COUNT(*) c FROM assignments WHERE shift_id=? AND status!='sick'",
-        (target_shift["id"],)).fetchone()["c"]
-    slots = conn.execute("SELECT slots FROM shifts WHERE id=?",
-                         (target_shift["id"],)).fetchone()["slots"]
     conn.close()
     if req_st == "approved_ok":
         assert now_on_target, "sam should hold the target shift after approval"
         assert not_on_old is None, "sam should no longer hold the old shift"
         print("4. Switch request approved -> sam moved to target shift: OK")
     else:
-        assert staffed >= slots, "declined switch must have been into a full shift"
-        print("4. Switch request correctly declined (target shift was full): OK")
+        assert not_on_old, "a declined switch must leave the old assignment in place"
+        print("4. Switch request correctly declined by availability rules: OK")
 else:
     print("4. Switch request: skipped (no free shift to switch into this week)")
 
@@ -202,7 +210,7 @@ if pend:
 conn = appmod.db()
 understaffed = conn.execute(
     """SELECT s.id, s.day, s.slots, COUNT(a.id) staffed FROM shifts s
-       LEFT JOIN assignments a ON a.shift_id=s.id AND a.status!='sick'
+       LEFT JOIN assignments a ON a.shift_id=s.id AND a.status NOT IN ('sick','swap_requested')
        WHERE s.week_start=? GROUP BY s.id""",
     (week,)).fetchall()
 gaps = [r for r in understaffed if r["staffed"] < r["slots"]]
@@ -278,24 +286,29 @@ if j_shift:
     jrow = conn.execute(
         "SELECT status FROM assignments WHERE shift_id=? AND user_id=?",
         (j_shift["id"], jordan_uid)).fetchone()
-    coverer = conn.execute(
-        "SELECT u.username, a.status FROM assignments a JOIN users u ON u.id=a.user_id "
-        "WHERE a.shift_id=? AND a.user_id!=? AND a.status='notified'",
-        (j_shift["id"], jordan_uid)).fetchone()
+    swap_status = conn.execute(
+        "SELECT status FROM requests WHERE kind='swap' AND shift_id=? AND user_id=? "
+        "ORDER BY id DESC LIMIT 1", (j_shift["id"], jordan_uid)).fetchone()["status"]
+    staffed = conn.execute(
+        "SELECT COUNT(*) FROM assignments WHERE shift_id=? "
+        "AND status NOT IN ('sick','swap_requested')",
+        (j_shift["id"],)).fetchone()[0]
+    slots = conn.execute("SELECT slots FROM shifts WHERE id=?",
+                         (j_shift["id"],)).fetchone()[0]
     mgr_alert = conn.execute(
         "SELECT 1 FROM notifications WHERE user_id=(SELECT id FROM users "
         "WHERE role='manager') AND message LIKE '%requested a swap%' "
         "AND message LIKE '%nobody can cover%'").fetchone()
     conn.close()
-    if coverer is not None:
-        assert jrow is None, "covered swap should remove jordan's row entirely"
+    if swap_status == "approved_ok":
+        assert jrow is None, "covered swap must remove the old assignment"
+        assert staffed == slots, "covered swap must fill the shift"
         assert b"Swap arranged" in r.data
         jrow_status_uncovered = False
-        print(f"8. Swap auto-covered: {coverer['username']} takes jordan's "
-              f"{j_shift['day']} shift instantly: OK")
+        print(f"8. Swap auto-covered for Jordan's {j_shift['day']} shift: OK")
     else:
-        assert jrow and jrow["status"] == "swap_requested", \
-            "uncovered swap should leave jordan's row as swap_requested"
+        assert swap_status == "approved" and jrow["status"] == "swap_requested"
+        assert staffed < slots, "uncovered swap must leave a staffing gap"
         assert mgr_alert, "no coverer -> manager must be alerted"
         assert b"nobody is available" in r.data
         jrow_status_uncovered = True

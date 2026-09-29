@@ -5,12 +5,14 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import app as appmod
+from test_support import isolate_database
+_test_db = isolate_database(appmod)
 
 WEEK = "2026-09-28"
 DB = appmod.DB_PATH
 if DB.exists():
     DB.unlink()
-appmod.init_db()
+appmod.init_db(seed_demo=True)
 conn = appmod.db()
 conn.execute("DELETE FROM shifts")
 conn.execute("DELETE FROM picks")

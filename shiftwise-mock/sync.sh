@@ -10,9 +10,10 @@ if [[ $# -gt 1 || ( $# -eq 1 && "$1" != "--reseed" ) ]]; then
     exit 2
 fi
 
-python_bin=../.venv/bin/python
+python_bin="$(cd .. && pwd)/.venv/bin/python"
 if [[ ! -x "$python_bin" ]]; then
-    python_bin=python3
+    echo "Missing suite virtualenv; run python3 -m venv .venv and install requirements.txt" >&2
+    exit 1
 fi
 
 cp ../app.py app.py

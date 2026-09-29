@@ -26,7 +26,7 @@ Existing databases with plain text passwords are migrated to password hashes at 
 
 ## Mock demo
 
-The mock source mirrors the main app. To sync it and create a fresh eight employee demo database:
+The mock source mirrors the main app. To sync it and create a fresh ten-employee, Mon–Sun FOH/BOH demo database:
 
 ```sh
 ./shiftwise-mock/sync.sh --reseed
@@ -34,7 +34,7 @@ cd shiftwise-mock
 ../.venv/bin/python app.py
 ```
 
-`--reseed` deletes the mock database and its request history. Run `./shiftwise-mock/sync.sh` without that flag to keep the current mock data. The mock listens on `127.0.0.1:5001` and has known demo passwords, so keep it local.
+`--reseed` deletes the mock database and its request history. Run `./shiftwise-mock/sync.sh` without that flag to keep the current mock data. The mock listens on `127.0.0.1:5001` and has known demo passwords, so keep it local. The suite's `.venv` is used by both apps and all tests; the older `scheduler` checkout is not required.
 
 ## Tests
 

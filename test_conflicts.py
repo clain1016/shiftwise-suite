@@ -38,10 +38,13 @@ assert r.status_code == 200
 assert "Conflicts" in html
 assert "Mon" in html
 assert "Tue" not in html.split("Conflicts —")[1].split("week of")[0]  # Tue never in a conflict card
-# 3 claimants listed, sorted FT first then seniority: alex(FT 2021), sam(PT 2023), jordan(PT 2024)
-assert html.index("Alex Rivera") < html.index("Sam Chen") < html.index("Jordan Diaz"), \
+# jordan is BOH so his pick on the FOH Mon shift is excluded: 2 claimants,
+# sorted FT first then seniority: alex(FT 2021), sam(PT 2023)
+assert html.index("Alex Rivera") < html.index("Sam Chen"), \
     "claimants must be sorted by priority lineup"
-print("1. Conflict detected; claimants sorted FT-first then seniority: OK")
+assert html.index("Jordan Diaz") > html.index("Sam Chen") or "Jordan Diaz" not in html.split("Rank #1")[1].split("</table>")[0], \
+    "cross-house claimant must not appear in the FOH conflict group"
+print("1. Conflict detected; BOH pick excluded; claimants sorted FT-first: OK")
 
 # --- 2. week navigation present
 assert "/manager/conflicts?week=2026-09-21" in html

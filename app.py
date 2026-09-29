@@ -38,7 +38,8 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT NOT NULL DEFAULT 'employee',
     weekly_hours INTEGER DEFAULT 40,
     employment_type TEXT NOT NULL DEFAULT 'part_time',
-    hired_on TEXT
+    hired_on TEXT,
+    station TEXT NOT NULL DEFAULT 'front'  -- 'front' = front of house, 'back' = back of house
 );
 CREATE TABLE IF NOT EXISTS shifts (
     id INTEGER PRIMARY KEY,
@@ -47,7 +48,8 @@ CREATE TABLE IF NOT EXISTS shifts (
     start_time TEXT NOT NULL,
     end_time TEXT NOT NULL,
     slots INTEGER NOT NULL DEFAULT 1,
-    note TEXT
+    note TEXT,
+    area TEXT NOT NULL DEFAULT 'front'  -- 'front' = front of house, 'back' = back of house
 );
 CREATE TABLE IF NOT EXISTS picks (
     id INTEGER PRIMARY KEY,
@@ -120,6 +122,13 @@ def init_db():
             "ALTER TABLE users ADD COLUMN employment_type TEXT NOT NULL DEFAULT 'part_time'")
     if "hired_on" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN hired_on TEXT")
+    if "station" not in cols:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN station TEXT NOT NULL DEFAULT 'front'")
+    scols = [r[1] for r in conn.execute("PRAGMA table_info(shifts)")]
+    if "area" not in scols:
+        conn.execute(
+            "ALTER TABLE shifts ADD COLUMN area TEXT NOT NULL DEFAULT 'front'")
     rcols = [r[1] for r in conn.execute("PRAGMA table_info(requests)")]
     if "vacation_start" not in rcols:
         conn.execute("ALTER TABLE requests ADD COLUMN vacation_start TEXT")
@@ -128,27 +137,37 @@ def init_db():
     if not conn.execute("SELECT 1 FROM users LIMIT 1").fetchone():
         conn.executemany(
             "INSERT INTO users (username, password, name, role, weekly_hours,"
-            " employment_type, hired_on) VALUES (?,?,?,?,?,?,?)",
+            " employment_type, hired_on, station) VALUES (?,?,?,?,?,?,?,?)",
             [
-                ("manager", "manager", "Store Manager", "manager", 40, "full_time", "2020-01-15"),
-                ("alex", "alex", "Alex Rivera", "employee", 30, "full_time", "2021-03-01"),
-                ("sam", "sam", "Sam Chen", "employee", 25, "part_time", "2023-06-10"),
-                ("jordan", "jordan", "Jordan Diaz", "employee", 35, "part_time", "2024-11-20"),
+                ("manager", "manager", "Store Manager", "manager", 40, "full_time", "2020-01-15", "front"),
+                ("alex", "alex", "Alex Rivera", "employee", 30, "full_time", "2021-03-01", "front"),
+                ("sam", "sam", "Sam Chen", "employee", 25, "part_time", "2023-06-10", "front"),
+                ("taylor", "taylor", "Taylor Brooks", "employee", 20, "part_time", "2025-02-11", "front"),
+                ("jordan", "jordan", "Jordan Diaz", "employee", 35, "part_time", "2024-11-20", "back"),
+                ("casey", "casey", "Casey Boots", "employee", 35, "part_time", "2023-05-01", "back"),
+                ("morgan", "morgan", "Morgan Vale", "employee", 40, "full_time", "2022-08-15", "back"),
             ],
         )
         week = monday_of(date.today()).isoformat()
         demo = [
-            (week, "Mon", "09:00", "17:00", 2, None),
-            (week, "Tue", "09:00", "17:00", 2, None),
-            (week, "Wed", "09:00", "17:00", 2, None),
-            (week, "Thu", "09:00", "17:00", 2, None),
-            (week, "Fri", "09:00", "17:00", 2, None),
-            (week, "Sat", "10:00", "18:00", 3, "Weekend rush"),
-            (week, "Sun", "11:00", "16:00", 2, "Short day"),
+            (week, "Mon", "09:00", "17:00", 1, None, "front"),
+            (week, "Tue", "09:00", "17:00", 1, None, "front"),
+            (week, "Wed", "09:00", "17:00", 1, None, "front"),
+            (week, "Thu", "09:00", "17:00", 1, None, "front"),
+            (week, "Fri", "09:00", "17:00", 1, None, "front"),
+            (week, "Sat", "10:00", "18:00", 2, "Weekend rush", "front"),
+            (week, "Sun", "11:00", "16:00", 1, "Short day", "front"),
+            (week, "Mon", "06:00", "14:00", 1, None, "back"),
+            (week, "Tue", "06:00", "14:00", 1, None, "back"),
+            (week, "Wed", "06:00", "14:00", 1, None, "back"),
+            (week, "Thu", "06:00", "14:00", 1, None, "back"),
+            (week, "Fri", "11:00", "20:00", 1, "Dinner prep + service", "back"),
+            (week, "Sat", "10:00", "20:00", 1, "Weekend covers", "back"),
+            (week, "Sun", "10:00", "16:00", 1, "Brunch", "back"),
         ]
         conn.executemany(
-            "INSERT INTO shifts (week_start, day, start_time, end_time, slots, note) "
-            "VALUES (?,?,?,?,?,?)", demo)
+            "INSERT INTO shifts (week_start, day, start_time, end_time, slots, note, area) "
+            "VALUES (?,?,?,?,?,?,?)", demo)
     conn.commit()
     conn.close()
 
@@ -181,16 +200,23 @@ def shift_hours(s, e):
 
 
 def priority_key(user_row):
-    """Sort key for the priority lineup: full-time before part-time, then
-    earliest hire date first. Shared by the auto-scheduler and the
-    conflict-resolution page so both sort identically."""
+    """Sort key for the priority lineup: front-of-house before back-of-house,
+    then full-time before part-time, then earliest hire date first. Shared by
+    the auto-scheduler and the conflict-resolution page so both sort
+    identically."""
     seniority = 0 if not user_row["hired_on"] else (
         datetime.now() - datetime.fromisoformat(user_row["hired_on"])).days
-    return (0 if user_row["employment_type"] == "full_time" else 1, -seniority)
+    return ((0 if user_row["station"] == "front" else 1,
+             0 if user_row["employment_type"] == "full_time" else 1,
+             -seniority))
 
 
 def coverage_plan(conn, week, out_shift_id, out_uid):
     """Pick the next-in-line coverer for a shift its holder is leaving.
+
+    Only considers coverers whose station matches the shift's area
+    (front-of-house shifts are covered by front staff, back-of-house
+    shifts by back staff) — a FOH/BOH employee is never pulled across.
 
     Candidates: other employees who picked this shift but didn't get it
     (in priority-lineup order), then anyone with room in their week
@@ -202,7 +228,8 @@ def coverage_plan(conn, week, out_shift_id, out_uid):
     if not shift:
         return None
     employees = conn.execute(
-        "SELECT * FROM users WHERE role='employee' ORDER BY id").fetchall()
+        "SELECT * FROM users WHERE role='employee' AND station=? ORDER BY id",
+        (shift["area"],)).fetchall()
     # current week hours + working days for every employee, excluding the
     # shift being covered (its holder's hours leave with them) and any
     # existing 'sick' rows (a sick assignment counts for nobody)
@@ -365,6 +392,7 @@ def run_scheduler(week_start, actor="system"):
         shift_hours_map = {s["id"]: shift_hours(s["start_time"], s["end_time"])
                            for s in shifts}
         shift_by_id = {s["id"]: s for s in shifts}
+        area_of = {s["id"]: s["area"] for s in shifts}
 
         for r in fixed:
             if r["user_id"] in users:
@@ -385,7 +413,8 @@ def run_scheduler(week_start, actor="system"):
 
         # defensive: ignore picks belonging to non-employees (e.g. stale
         # rows created before the manager role check existed)
-        picks = [p for p in picks if p["user_id"] in users]
+        picks = [p for p in picks
+                 if p["user_id"] in users and p["shift_id"] in area_of]
 
         # user_id -> {rank: [shift_ids]} — tied ranks allowed, resolved in
         # submission order within the round
@@ -393,11 +422,18 @@ def run_scheduler(week_start, actor="system"):
         for p in picks:
             user_prefs[p["user_id"]][p["rank"]].append(p["shift_id"])
 
-        # Priority lineup: full-time before part-time, then earliest hire
-        # date first. Employees missing a hire date rank last within their
-        # group (treated as newest).
+        # Priority lineup: front-of-house before back-of-house, then
+        # full-time before part-time, then earliest hire date first.
+        # Employees missing a hire date rank last within their group
+        # (treated as newest). Each employee is only scheduled into
+        # shifts of their own area: a FOH employee's picks on BOH
+        # shifts (and vice versa) are ignored — the two houses run as
+        # two separate schedules.
         priority = lambda uid: priority_key(users[uid])
         vac_blocked = vacation_blocked_uids(conn)
+        my_area = {uid: users[uid]["station"] for uid in users}
+        eligible = lambda uid, sid: (sid in area_of and
+                                     my_area[uid] == area_of[sid])
 
         max_rank = max((max(prefs) for prefs in user_prefs.values()), default=0)
         for rnd in range(1, max_rank + 1):
@@ -408,6 +444,8 @@ def run_scheduler(week_start, actor="system"):
                 for sid in prefs.get(rnd, []):
                     if sid in [a[0] for a in user_assignments[uid]]:
                         continue
+                    if not eligible(uid, sid):
+                        continue  # FOH pick on a BOH shift (or vice versa)
                     claimants.append((priority(uid), uid, sid))
             claimants.sort()
             for _, uid, sid in claimants:
@@ -553,8 +591,16 @@ def logout():
 def dashboard():
     conn = db()
     week = monday_of(date.today()).isoformat()
-    shifts = conn.execute(
-        "SELECT * FROM shifts WHERE week_start=? ORDER BY id", (week,)).fetchall()
+    my = conn.execute("SELECT * FROM users WHERE id=?", (session["uid"],)).fetchone()
+    # employees only see (and pick) shifts in their own house — FOH and BOH
+    # are two separate schedules; managers see everything.
+    if session["role"] == "manager":
+        shifts = conn.execute(
+            "SELECT * FROM shifts WHERE week_start=? ORDER BY id", (week,)).fetchall()
+    else:
+        shifts = conn.execute(
+            "SELECT * FROM shifts WHERE week_start=? AND area=? ORDER BY id",
+            (week, my["station"])).fetchall()
     my_assignments = {}
     for r in conn.execute(
             "SELECT shift_id, status FROM assignments WHERE user_id=?", (session["uid"],)):
@@ -575,7 +621,7 @@ def dashboard():
     conn.close()
     return render_template("dashboard.html", shifts=shifts, DAYS=DAYS, week=week,
                            my_assignments=my_assignments, my_picks=my_picks,
-                           roster=roster, notifs=notifs)
+                           my_station=my["station"], roster=roster, notifs=notifs)
 
 
 @app.route("/pick", methods=["POST"])
@@ -587,8 +633,10 @@ def pick():
     conn = db()
     uid = session["uid"]
     week = monday_of(date.today()).isoformat()
+    my_station = conn.execute("SELECT station FROM users WHERE id=?", (uid,)).fetchone()
     week_shifts = [r["id"] for r in conn.execute(
-        "SELECT id FROM shifts WHERE week_start=?", (week,))]
+        "SELECT id FROM shifts WHERE week_start=? AND area=?",
+        (week, my_station["station"] if my_station else "front"))]
     ranked = []
     missing = []
     for sid in week_shifts:
@@ -825,6 +873,11 @@ def request_switch(shift_id):
         conn.close()
         flash("Target shift not found.")
         return redirect(url_for("dashboard"))
+    me = conn.execute("SELECT station FROM users WHERE id=?", (uid,)).fetchone()
+    if me and target_row["area"] != me["station"]:
+        conn.close()
+        flash("Switches stay within your own house — you can't switch onto the other schedule.")
+        return redirect(url_for("dashboard"))
     conn.execute(
         "INSERT INTO requests (user_id, kind, shift_id, target_shift_id, created_at) "
         "VALUES (?,?,?,?,?)",
@@ -868,25 +921,33 @@ def manager():
         "(SELECT a.user_id FROM assignments a JOIN shifts s ON s.id=a.shift_id "
         " WHERE s.week_start=?)", (week,)).fetchall()
     conn.close()
+    # FOH and BOH render as two independent schedule tables
+    front_shifts = [s for s in shifts if s["area"] == "front"]
+    back_shifts = [s for s in shifts if s["area"] == "back"]
     return render_template("manager.html", shifts=shifts, picks=picks, DAYS=DAYS,
                            assigned=assigned, week=week,
+                           front_shifts=front_shifts, back_shifts=back_shifts,
                            unassigned=[u["name"] for u in unassigned])
 
 
 @app.route("/manager/shift/add", methods=["POST"])
 @login_required(role="manager")
 def add_shift():
+    area = request.form.get("area", "front")
+    if area not in ("front", "back"):
+        area = "front"
     conn = db()
     conn.execute(
-        "INSERT INTO shifts (week_start, day, start_time, end_time, slots, note) "
-        "VALUES (?,?,?,?,?,?)",
+        "INSERT INTO shifts (week_start, day, start_time, end_time, slots, note, area) "
+        "VALUES (?,?,?,?,?,?,?)",
         (monday_of(date.today()).isoformat(), request.form["day"],
          request.form["start"], request.form["end"], int(request.form["slots"]),
-         request.form.get("note") or None))
-    for emp in conn.execute("SELECT id FROM users WHERE role='employee'"):
+         request.form.get("note") or None, area))
+    for emp in conn.execute(
+            "SELECT id FROM users WHERE role='employee' AND station=?", (area,)):
         notify(conn, emp["id"], "new_schedule",
-               f"New shift posted: {request.form['day']} "
-               f"{request.form['start']}-{request.form['end']} — submit your picks!")
+               f"New {request.form['day']} shift posted ({request.form['start']}-"
+               f"{request.form['end']}) for your area — submit your picks!")
     conn.commit()
     conn.close()
     # auto-rebuild: new shift changes capacity -> re-run the lineup
@@ -935,7 +996,7 @@ def conflicts():
     for s in shifts:
         claimants = conn.execute(
             "SELECT p.user_id, p.rank, u.name, u.employment_type, u.hired_on, "
-            "u.weekly_hours FROM picks p JOIN users u ON u.id=p.user_id "
+            "u.weekly_hours, u.station FROM picks p JOIN users u ON u.id=p.user_id "
             "WHERE p.shift_id=? ORDER BY p.rank", (s["id"],)).fetchall()
         if not claimants:
             continue
@@ -1183,6 +1244,9 @@ def roster():
             et = request.form.get(f"type_{uid}")
             hired = request.form.get(f"hired_{uid}", "").strip()
             cap = request.form.get(f"cap_{uid}", "").strip()
+            station = request.form.get(f"station_{uid}", "")
+            if station in ("front", "back"):
+                conn.execute("UPDATE users SET station=? WHERE id=?", (station, uid))
             if et in ("full_time", "part_time"):
                 conn.execute("UPDATE users SET employment_type=? WHERE id=?", (et, uid))
             conn.execute("UPDATE users SET hired_on=? WHERE id=?",

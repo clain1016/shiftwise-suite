@@ -37,7 +37,9 @@ for user in employees:
     login(user, user)
     client.get("/")
     conn = appmod.db()
-    rows = conn.execute("SELECT id, day FROM shifts").fetchall()
+    rows = conn.execute(
+        "SELECT id, day FROM shifts WHERE area="
+        "(SELECT station FROM users WHERE username=?)", (user,)).fetchall()
     conn.close()
     form = {}
     rank = 1

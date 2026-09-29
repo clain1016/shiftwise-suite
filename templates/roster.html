@@ -1,14 +1,20 @@
 {% extends "base.html" %}
 {% block content %}
 <h1 class="page-title">Roster</h1>
-<p class="muted" style="margin-bottom:18px">Auto-lineup order: full-time first (in order of hire date, earliest = most senior), then part-time the same way. Set each employee's type, hire date, and weekly hours cap. The scheduler never schedules anyone past their cap.</p>
+<p class="muted" style="margin-bottom:18px">Auto-lineup order: front of house before back of house, then full-time first (in order of hire date, earliest = most senior), then part-time the same way. Each employee's station decides which of the two schedules they belong to — FOH staff are never scheduled onto BOH shifts or vice versa. The scheduler never schedules anyone past their cap.</p>
 
 <form method="post" action="{{ url_for('roster') }}">
 <table>
-  <tr><th>Employee</th><th>Employment type</th><th>Hire date</th><th>Weekly hours cap</th></tr>
+  <tr><th>Employee</th><th>House</th><th>Employment type</th><th>Hire date</th><th>Weekly hours cap</th></tr>
   {% for e in employees %}
   <tr>
     <td><strong>{{ e.name }}</strong> <span class="muted">@{{ e.username }}</span></td>
+    <td>
+      <select name="station_{{ e.id }}">
+        <option value="front" {% if e.station == 'front' %}selected{% endif %}>Front of house</option>
+        <option value="back" {% if e.station == 'back' %}selected{% endif %}>Back of house</option>
+      </select>
+    </td>
     <td>
       <select name="type_{{ e.id }}">
         <option value="full_time" {% if e.employment_type == 'full_time' %}selected{% endif %}>Full-time</option>

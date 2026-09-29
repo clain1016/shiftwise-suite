@@ -40,7 +40,9 @@ for user, wanted in pick_plan.items():
     login(user, user)
     client.get("/")
     conn = appmod.db()
-    rows = conn.execute("SELECT id, day FROM shifts").fetchall()
+    rows = conn.execute(
+        "SELECT id, day FROM shifts WHERE area="
+        "(SELECT station FROM users WHERE username=?)", (user,)).fetchall()
     conn.close()
     form = {}
     for r in rows:
@@ -136,6 +138,7 @@ target_shift = conn.execute(
     "SELECT s.id FROM shifts s WHERE s.week_start=? AND s.id NOT IN "
     "(SELECT a.shift_id FROM assignments a WHERE a.user_id=?) AND "
     "(SELECT COUNT(*) FROM assignments a WHERE a.shift_id=s.id AND a.status!='sick') < s.slots "
+    "AND s.area=(SELECT station FROM users WHERE username='sam') "
     "ORDER BY s.id LIMIT 1", (week, uid_for("sam"))).fetchone()
 conn.close()
 if sam_shift and target_shift:
@@ -284,14 +287,15 @@ if j_shift:
         "WHERE role='manager') AND message LIKE '%requested a swap%' "
         "AND message LIKE '%nobody can cover%'").fetchone()
     conn.close()
-    assert jrow and jrow["status"] == "swap_requested", \
-        "jordan's row should be swap_requested"
     if coverer is not None:
+        assert jrow is None, "covered swap should remove jordan's row entirely"
         assert b"Swap arranged" in r.data
         jrow_status_uncovered = False
         print(f"8. Swap auto-covered: {coverer['username']} takes jordan's "
               f"{j_shift['day']} shift instantly: OK")
     else:
+        assert jrow and jrow["status"] == "swap_requested", \
+            "uncovered swap should leave jordan's row as swap_requested"
         assert mgr_alert, "no coverer -> manager must be alerted"
         assert b"nobody is available" in r.data
         jrow_status_uncovered = True

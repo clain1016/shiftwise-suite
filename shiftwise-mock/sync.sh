@@ -1,12 +1,12 @@
 #!/bin/bash
-# Sync the mock scheduler from the real app after every feature addition.
+# Sync the mock ShiftWise twin from the real app after every feature addition.
 # Copies app.py + templates, fixes the port to 5001, then force-reseeds the
-# mock DB with 8 fake employees and a full Mon-Sun demo week — independent
-# of whatever demo data the real app seeds.
+# mock DB with 10 fake employees (5 FOH / 5... 4 BOH) and a full Mon-Sun demo
+# week split into front-of-house and back-of-house schedules.
 set -e
 cd "$(dirname "$0")"
-cp ../scheduler/app.py app.py
-cp ../scheduler/templates/*.html templates/
+cp ../app.py app.py
+cp ../templates/*.html templates/
 /home/cody/scheduler/.venv/bin/python - <<'EOF'
 import pathlib
 p = pathlib.Path("app.py")
@@ -23,8 +23,10 @@ sys.path.insert(0, '.')
 import app as a
 import mock_seed
 a.init_db()                      # create tables (runs real seed, gets wiped next)
-n, d, p = mock_seed.seed(a)      # force the 8-employee mock roster + picks
-print(f"mock DB reseeded: {n} employees, Mon-Sun demo week ({d} days), "
-      f"{p} pre-seeded picks")
+n, d, p = mock_seed.seed(a)      # force the fake mock roster + picks
+week = a.monday_of(a.date.today()).isoformat()
+n_assign = a.run_scheduler(week)  # pre-seeded picks -> filled demo schedule
+print(f"mock DB reseeded: {n} fake employees (FOH+BOH), Mon-Sun demo week "
+      f"({d} days per house), {p} pre-seeded picks, {n_assign} picks scheduled")
 EOF
 echo "sync complete — restart the mock server to pick up changes"

@@ -43,7 +43,9 @@ for user, plist in picks.items():
         pass
     # simpler: query db
     conn = appmod.db()
-    rows = conn.execute("SELECT id, day FROM shifts").fetchall()
+    rows = conn.execute(
+        "SELECT id, day FROM shifts WHERE area="
+        "(SELECT station FROM users WHERE username=?)", (user,)).fetchall()
     conn.close()
     form = {}
     for day, rank in plist:
@@ -63,19 +65,29 @@ print(r.data.decode().split('class="flash">')[1].split("</div>")[0])
 # --- 4. verify assignment outcome in DB
 conn = appmod.db()
 rows = conn.execute(
-    "SELECT s.day, u.name, a.status FROM assignments a "
+    "SELECT s.day, u.name, a.status, s.area FROM assignments a "
     "JOIN shifts s ON s.id=a.shift_id JOIN users u ON u.id=a.user_id ORDER BY s.id, u.name").fetchall()
 conn.close()
 print("\nAssignments:")
 for r_ in rows:
-    print(f"  {r_['day']}: {r_['name']} ({r_['status']})")
+    house = "FOH" if r_["area"] == "front" else "BOH"
+    print(f"  [{house}] {r_['day']}: {r_['name']} ({r_['status']})")
 
-# Mon has 2 slots, 3 people wanted it rank-1 -> the odd one out lands on backups
-mon = [r_ for r_ in rows if r_["day"] == "Mon"]
-assert len(mon) == 2, f"Mon should have exactly 2 assigned, got {len(mon)}"
+# every employee ends up only on their own house's shifts
+conn = appmod.db()
+cross = conn.execute(
+    "SELECT u.name FROM assignments a JOIN shifts s ON s.id=a.shift_id "
+    "JOIN users u ON u.id=a.user_id WHERE s.area!=u.station").fetchall()
+conn.close()
+assert not cross, f"cross-house assignments leaked: {[r['name'] for r in cross]}"
+print("FOH/BOH separation verified: nobody is scheduled across houses.")
+
+# the three pickers (alex, sam FOH; jordan BOH) each land 2+ shifts — the
+# unpicked FOH slots go to backfill, which legally covers pick-less staff
 per_emp = defaultdict(int)
 for r_ in rows:
-    per_emp[r_["name"]] += 1
+    if r_["name"] in ("Alex Rivera", "Sam Chen", "Jordan Diaz"):
+        per_emp[r_["name"]] += 1
 for name, n in per_emp.items():
     assert n >= 2, f"{name} only got {n} shifts"
 
@@ -105,11 +117,12 @@ sid = appmod.db().execute(
     "SELECT s.id FROM assignments a JOIN shifts s ON s.id=a.shift_id "
     "JOIN users u ON u.id=a.user_id WHERE u.name='Alex Rivera' LIMIT 1").fetchone()["id"]
 
-# --- 6. swap request pings the manager
+# --- 6. swap request: auto-covered when a house-mate has room, else
+# manager is alerted — either way the requester is relieved
 r = client.post(f"/swap/{sid}", follow_redirects=True)
-assert b"Swap requested" in r.data
+assert b"Swap arranged" in r.data or b"Swap requested" in r.data
 conn = appmod.db()
-n = conn.execute("SELECT COUNT(*) c FROM notifications WHERE kind='swap_request'").fetchone()["c"]
+n = conn.execute("SELECT COUNT(*) c FROM requests WHERE kind='swap'").fetchone()["c"]
 conn.close()
 assert n >= 1
 print("swap-request flow OK")

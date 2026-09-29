@@ -1162,17 +1162,28 @@ def add_shift():
         flash("Choose a day, an end time after the start, and 1–10 slots.")
         return redirect(url_for("manager"))
     conn = db()
-    conn.execute(
-        "INSERT INTO shifts (week_start, day, start_time, end_time, slots, note, area) "
-        "VALUES (?,?,?,?,?,?,?)",
-        (monday_of(date.today()).isoformat(), day,
-         start_time.strftime("%H:%M"), end_time.strftime("%H:%M"), slots,
-         request.form.get("note") or None, area))
-    for emp in conn.execute(
-            "SELECT id FROM users WHERE role='employee' AND station=?", (area,)):
-        notify(conn, emp["id"], "new_schedule",
-               f"New {day} shift posted ({start}-{end})"
-               f" for your area — submit your picks!")
+    week = monday_of(date.today()).isoformat()
+    start_text = start_time.strftime("%H:%M")
+    end_text = end_time.strftime("%H:%M")
+    note = request.form.get("note") or None
+    areas = (area, "back" if area == "front" else "front")
+    for shift_area in areas:
+        exists = conn.execute(
+            "SELECT 1 FROM shifts WHERE week_start=? AND day=? AND start_time=? "
+            "AND end_time=? AND area=? LIMIT 1",
+            (week, day, start_text, end_text, shift_area)).fetchone()
+        if exists:
+            continue
+        conn.execute(
+            "INSERT INTO shifts (week_start, day, start_time, end_time, slots, note, area) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (week, day, start_text, end_text, slots, note, shift_area))
+        for emp in conn.execute(
+                "SELECT id FROM users WHERE role='employee' AND station=?",
+                (shift_area,)):
+            notify(conn, emp["id"], "new_schedule",
+                   f"New {day} shift posted ({start}-{end})"
+                   f" for your area — submit your picks!")
     conn.commit()
     conn.close()
     # auto-rebuild: new shift changes capacity -> re-run the lineup

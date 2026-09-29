@@ -6,12 +6,14 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import app as appmod
+from test_support import isolate_database
+_test_db = isolate_database(appmod)
 from collections import defaultdict
 
 DB = appmod.DB_PATH
 if DB.exists():
     DB.unlink()
-appmod.init_db()
+appmod.init_db(seed_demo=True)
 client = appmod.app.test_client()
 
 def login(user, pw):
@@ -57,7 +59,7 @@ all_ok = True
 for s in shifts:
     staff = conn.execute(
         "SELECT u.name, a.status FROM assignments a JOIN users u ON u.id=a.user_id "
-        "WHERE a.shift_id=? AND a.status!='sick' ORDER BY u.name", (s["id"],)).fetchall()
+        "WHERE a.shift_id=? AND a.status NOT IN ('sick','swap_requested') ORDER BY u.name", (s["id"],)).fetchall()
     mark = "OK" if len(staff) >= s["slots"] else "GAP"
     if len(staff) < s["slots"]:
         coverable = appmod.coverage_plan(conn, week, s["id"], None) is not None
@@ -97,7 +99,7 @@ for user in employees:
 gaps = []
 for s in shifts:
     staff = conn.execute(
-        "SELECT COUNT(*) c FROM assignments WHERE shift_id=? AND status!='sick'",
+        "SELECT COUNT(*) c FROM assignments WHERE shift_id=? AND status NOT IN ('sick','swap_requested')",
         (s["id"],)).fetchone()["c"]
     if staff < s["slots"]:
         if appmod.coverage_plan(conn, week, s["id"], None) is not None:

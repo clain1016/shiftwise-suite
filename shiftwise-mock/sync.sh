@@ -1,32 +1,46 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Sync the mock ShiftWise twin from the real app after every feature addition.
-# Copies app.py + templates, fixes the port to 5001, then force-reseeds the
-# mock DB with 10 fake employees (5 FOH / 5... 4 BOH) and a full Mon-Sun demo
-# week split into front-of-house and back-of-house schedules.
-set -e
+# Copies app.py + templates, fixes the port to 5001, and (with --reseed)
+# force-reseeds the mock DB with the fake FOH/BOH roster and Mon-Sun demo week.
+set -euo pipefail
+
 cd "$(dirname "$0")"
+if [[ $# -gt 1 || ( $# -eq 1 && "$1" != "--reseed" ) ]]; then
+    echo "usage: $0 [--reseed]" >&2
+    exit 2
+fi
+
+python_bin=../.venv/bin/python
+if [[ ! -x "$python_bin" ]]; then
+    python_bin=python3
+fi
+
 cp ../app.py app.py
 cp ../templates/*.html templates/
-/home/cody/scheduler/.venv/bin/python - <<'EOF'
-import pathlib
-p = pathlib.Path("app.py")
-src = p.read_text()
-src = src.replace('app.run(host="0.0.0.0", port=5000, debug=True)',
-                  'app.run(host="0.0.0.0", port=5001, debug=True)')
-p.write_text(src)
-print("port set to 5001")
-EOF
-rm -f scheduler.db*
-/home/cody/scheduler/.venv/bin/python - <<'EOF'
-import sys
-sys.path.insert(0, '.')
-import app as a
+
+# The mock runs on its own port and database. Keep these settings local to
+# the copied entry point so the scheduler logic stays identical.
+"$python_bin" - <<'PY'
+from pathlib import Path
+
+path = Path("app.py")
+source = path.read_text()
+source = source.replace('os.environ.get("SHIFTWISE_PORT", "5000")',
+                        'os.environ.get("SHIFTWISE_PORT", "5001")')
+path.write_text(source)
+PY
+
+if [[ "${1:-}" == "--reseed" ]]; then
+    rm -f scheduler.db scheduler.db-wal scheduler.db-shm
+    SHIFTWISE_DB_PATH="$PWD/scheduler.db" "$python_bin" - <<'PY'
+import app
 import mock_seed
-a.init_db()                      # create tables (runs real seed, gets wiped next)
-n, d, p = mock_seed.seed(a)      # force the fake mock roster + picks
-week = a.monday_of(a.date.today()).isoformat()
-n_assign = a.run_scheduler(week)  # pre-seeded picks -> filled demo schedule
-print(f"mock DB reseeded: {n} fake employees (FOH+BOH), Mon-Sun demo week "
-      f"({d} days per house), {p} pre-seeded picks, {n_assign} picks scheduled")
-EOF
-echo "sync complete — restart the mock server to pick up changes"
+
+app.init_db(seed_demo=True)
+employees, days, picks = mock_seed.seed(app)
+print(f"mock database seeded: {employees} fake employees (FOH+BOH), "
+      f"{days} days/house, {picks} pre-seeded picks")
+PY
+fi
+
+echo "mock source synced; restart the mock server to load it"

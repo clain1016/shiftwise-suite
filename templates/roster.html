@@ -3,6 +3,19 @@
 <h1 class="page-title">Roster</h1>
 <p class="muted" style="margin-bottom:18px">Auto-lineup order: front of house before back of house, then full-time first (in order of hire date, earliest = most senior), then part-time the same way. Each employee's station decides which of the two schedules they belong to — FOH staff are never scheduled onto BOH shifts or vice versa. The scheduler never schedules anyone past their cap.</p>
 
+<div class="card" style="margin-bottom:18px">
+  <h2 style="margin-top:0">Add employee</h2>
+  <form method="post" action="{{ url_for('add_employee') }}" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+    <input name="username" placeholder="Username" required>
+    <input name="name" placeholder="Name" required>
+    <input name="password" type="password" placeholder="Initial password (12+ characters)" minlength="12" required>
+    <select name="employment_type"><option value="full_time">Full-time</option><option value="part_time">Part-time</option></select>
+    <input name="hired_on" type="date" aria-label="Hire date">
+    <input name="weekly_hours" type="number" value="40" min="1" max="168" aria-label="Weekly hours cap" required>
+    <button class="btn">Add employee</button>
+  </form>
+</div>
+
 <form method="post" action="{{ url_for('roster') }}">
 <table>
   <tr><th>Employee</th><th>House</th><th>Employment type</th><th>Hire date</th><th>Weekly hours cap</th></tr>
@@ -22,7 +35,7 @@
       </select>
     </td>
     <td><input type="date" name="hired_{{ e.id }}" value="{{ e.hired_on or '' }}"></td>
-    <td><input type="number" name="cap_{{ e.id }}" value="{{ e.weekly_hours or 40 }}" min="1" max="80" style="width:74px"></td>
+    <td><input type="number" name="cap_{{ e.id }}" value="{{ e.weekly_hours or 40 }}" min="1" max="168" style="width:74px"></td>
   </tr>
   {% endfor %}
 </table>

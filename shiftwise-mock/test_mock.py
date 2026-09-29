@@ -5,11 +5,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 import app as appmod
 import mock_seed
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from test_support import isolate_database
+_test_db = isolate_database(appmod)
 
 DB = appmod.DB_PATH
 if DB.exists():
     DB.unlink()
-appmod.init_db()
+appmod.init_db(seed_demo=True)
 mock_seed.seed(appmod)
 
 week = appmod.monday_of(__import__("datetime").date.today()).isoformat()

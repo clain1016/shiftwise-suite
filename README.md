@@ -22,6 +22,10 @@ export SHIFTWISE_SECRET_KEY="$(python3 -c 'import secrets; print(secrets.token_h
 
 The app listens on `127.0.0.1:5000` by default. Set `SHIFTWISE_HOST` and `SHIFTWISE_PORT` to change the listener. Keep the session secret stable across restarts. Set `SHIFTWISE_DB_PATH` to place the SQLite database elsewhere. The bootstrap password is needed only when creating the first manager or replacing an old demo manager password.
 
+## Email and text schedule links
+
+The manager can save employee email addresses and E.164 phone numbers on the Roster page, then send the employee a link to sign in and submit schedule preferences. Set `SHIFTWISE_PUBLIC_URL` to the app's externally reachable HTTPS address. Email uses SMTP (`SHIFTWISE_SMTP_HOST`, `SHIFTWISE_SMTP_FROM`, and optionally `SHIFTWISE_SMTP_PORT`, `SHIFTWISE_SMTP_USER`, `SHIFTWISE_SMTP_PASSWORD`). SMS uses Twilio (`SHIFTWISE_TWILIO_ACCOUNT_SID`, `SHIFTWISE_TWILIO_AUTH_TOKEN`, `SHIFTWISE_TWILIO_FROM`). Configure whichever channel you plan to use in `.env` or the deployment secrets file, then restart the app. The message contains the sign-in link, not a password; employees still sign in with their existing account.
+
 Existing databases with plain text passwords are migrated to password hashes at startup. If an existing manager still uses the old demo password `manager`, set `SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD` to replace it during migration. Employees who used shared demo passwords can change them through the Password link after signing in.
 
 ## Mock demo

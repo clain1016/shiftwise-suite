@@ -11,11 +11,18 @@ Flow:
 
 Run: .venv/bin/python app.py  ->  http://127.0.0.1:5000
 """
+import base64
 import sqlite3
 import os
 import secrets
+import re
+import smtplib
+import urllib.error
+import urllib.parse
+import urllib.request
 from collections import defaultdict
 from datetime import datetime, timedelta, date
+from email.message import EmailMessage
 from functools import wraps
 from pathlib import Path
 
@@ -64,7 +71,9 @@ CREATE TABLE IF NOT EXISTS users (
     weekly_hours INTEGER DEFAULT 40,
     employment_type TEXT NOT NULL DEFAULT 'part_time',
     hired_on TEXT,
-    station TEXT NOT NULL DEFAULT 'front'  -- 'front' = front of house, 'back' = back of house
+    station TEXT NOT NULL DEFAULT 'front',  -- 'front' = front of house, 'back' = back of house
+    email TEXT,
+    phone TEXT
 );
 CREATE TABLE IF NOT EXISTS shifts (
     id INTEGER PRIMARY KEY,
@@ -128,6 +137,60 @@ def monday_of(d):
     return d - timedelta(days=d.weekday())
 
 
+def valid_email(value):
+    return not value or bool(re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", value))
+
+
+def valid_phone(value):
+    return not value or bool(re.fullmatch(r"\+[1-9]\d{7,14}", value))
+
+
+def send_schedule_link(channel, destination, employee_name, link):
+    """Deliver a sign-in link through the configured SMTP or Twilio account."""
+    message_text = (f"Hi {employee_name}, use this link to sign in to ShiftWise "
+                    f"and submit your schedule preferences: {link}")
+    if channel == "email":
+        host = os.environ.get("SHIFTWISE_SMTP_HOST")
+        sender = os.environ.get("SHIFTWISE_SMTP_FROM")
+        if not host or not sender:
+            raise ValueError("Email delivery is not configured (SMTP host/from missing).")
+        msg = EmailMessage()
+        msg["Subject"] = "Your ShiftWise schedule link"
+        msg["From"] = sender
+        msg["To"] = destination
+        msg.set_content(message_text)
+        port = int(os.environ.get("SHIFTWISE_SMTP_PORT", "587"))
+        with smtplib.SMTP(host, port, timeout=20) as server:
+            server.starttls()
+            username = os.environ.get("SHIFTWISE_SMTP_USER")
+            password = os.environ.get("SHIFTWISE_SMTP_PASSWORD")
+            if username:
+                server.login(username, password or "")
+            server.send_message(msg)
+        return
+    if channel == "sms":
+        sid = os.environ.get("SHIFTWISE_TWILIO_ACCOUNT_SID")
+        token = os.environ.get("SHIFTWISE_TWILIO_AUTH_TOKEN")
+        sender = os.environ.get("SHIFTWISE_TWILIO_FROM")
+        if not sid or not token or not sender:
+            raise ValueError("Text delivery is not configured (Twilio credentials/from missing).")
+        data = urllib.parse.urlencode({"To": destination, "From": sender,
+                                       "Body": message_text}).encode()
+        request_obj = urllib.request.Request(
+            f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",
+            data=data, headers={"Authorization": "Basic " +
+                                base64.b64encode(
+                                    f"{sid}:{token}".encode()).decode()})
+        try:
+            with urllib.request.urlopen(request_obj, timeout=20) as response:
+                if response.status >= 300:
+                    raise ValueError("Text provider rejected the message.")
+        except urllib.error.HTTPError as exc:
+            raise ValueError("Text provider rejected the message.") from exc
+        return
+    raise ValueError("Choose email or text delivery.")
+
+
 def unavailable_uids(conn, shift):
     """Employees with an active absence or swap request for this shift."""
     shift_date = (date.fromisoformat(shift["week_start"]) +
@@ -155,6 +218,10 @@ def init_db(seed_demo=False, mock_roster=False):
     if "station" not in cols:
         conn.execute(
             "ALTER TABLE users ADD COLUMN station TEXT NOT NULL DEFAULT 'front'")
+    if "email" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
+    if "phone" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN phone TEXT")
     scols = [r[1] for r in conn.execute("PRAGMA table_info(shifts)")]
     if "area" not in scols:
         conn.execute(
@@ -266,7 +333,8 @@ def shift_hours(s, e):
     return (eh * 60 + em - sh * 60 - sm) / 60.0
 
 
-def assignment_block_reason(conn, uid, shift, exclude_shift_id=None):
+def assignment_block_reason(conn, uid, shift, exclude_shift_id=None,
+                            allow_over_limits=False):
     """Return the rule preventing a user from working a shift, if any."""
     if uid in unavailable_uids(conn, shift):
         return "unavailable"
@@ -278,11 +346,13 @@ def assignment_block_reason(conn, uid, shift, exclude_shift_id=None):
     cap_row = conn.execute("SELECT weekly_hours FROM users WHERE id=?", (uid,)).fetchone()
     if not cap_row:
         return "unavailable"
-    if sum(shift_hours(r["start_time"], r["end_time"]) for r in rows) + \
+    if not allow_over_limits and sum(
+            shift_hours(r["start_time"], r["end_time"]) for r in rows) + \
             shift_hours(shift["start_time"], shift["end_time"]) > (cap_row[0] or 40):
         return "hours"
     days = {r["day"] for r in rows}
-    if shift["day"] not in days and len(days) >= 7 - MIN_DAYS_OFF:
+    if not allow_over_limits and shift["day"] not in days and \
+            len(days) >= 7 - MIN_DAYS_OFF:
         return "days"
     for r in rows:
         if r["day"] == shift["day"] and \
@@ -304,7 +374,7 @@ def priority_key(user_row):
              -seniority))
 
 
-def coverage_plan(conn, week, out_shift_id, out_uid):
+def coverage_plan(conn, week, out_shift_id, out_uid, allow_over_limits=False):
     """Pick the next-in-line coverer for a shift its holder is leaving.
 
     Only considers coverers whose station matches the shift's area
@@ -345,7 +415,8 @@ def coverage_plan(conn, week, out_shift_id, out_uid):
         uid = u["id"]
         if uid in already_on:
             return False
-        return assignment_block_reason(conn, uid, shift) is None
+        return assignment_block_reason(
+            conn, uid, shift, allow_over_limits=allow_over_limits) is None
 
     # 1. people who picked this shift but didn't get it — best in lineup.
     # With out_uid=None (backfill pass) every picker is eligible to be
@@ -437,6 +508,11 @@ def run_scheduler(week_start, actor="system"):
         shift_ids = [s["id"] for s in shifts]
         if not shift_ids:
             return 0
+        week_end = (date.fromisoformat(week_start) + timedelta(days=6)).isoformat()
+        vacation_review = conn.execute(
+            "SELECT 1 FROM requests WHERE kind='vacation' AND status='approved' "
+            "AND vacation_start<=? AND vacation_end>=? LIMIT 1",
+            (week_end, week_start)).fetchone() is not None
         ph = ",".join("?" * len(shift_ids))
         shift_by_id = {s["id"]: s for s in shifts}
         unavailable = {s["id"]: unavailable_uids(conn, s) for s in shifts}
@@ -585,7 +661,9 @@ def run_scheduler(week_start, actor="system"):
                 if open_n <= 0:
                     continue
                 for _ in range(open_n):
-                    cover_uid = coverage_plan(conn, week_start, s["id"], None)
+                    cover_uid = coverage_plan(
+                        conn, week_start, s["id"], None,
+                        allow_over_limits=vacation_review)
                     if cover_uid is None:
                         mgr = conn.execute(
                             "SELECT id FROM users WHERE role='manager'").fetchone()
@@ -617,7 +695,9 @@ def run_scheduler(week_start, actor="system"):
                     notify(conn, cover_uid, "assignment",
                            f"Coverage: you're now on {s['day']} "
                            f"{s['start_time']}-{s['end_time']} (covering an "
-                           "open slot).")
+                           "open slot)." + (" This vacation option may exceed "
+                           "your weekly hours or workday limit; check with your "
+                           "manager before confirming." if vacation_review else ""))
 
         # Once a replacement fills an unresolved swap's slot, clear the
         # original holder and close the request.
@@ -1315,6 +1395,25 @@ def requests():
     items = []
     for r in rows:
         item = dict(r)
+        if r["kind"] == "vacation" and r["status"] == "approved":
+            start = date.fromisoformat(r["vacation_start"])
+            end = date.fromisoformat(r["vacation_end"])
+            gaps = []
+            for shift in conn.execute(
+                    "SELECT * FROM shifts WHERE week_start>=? AND week_start<=?",
+                    (monday_of(start).isoformat(), end.isoformat())):
+                shift_date = date.fromisoformat(shift["week_start"]) + timedelta(
+                    days=DAYS.index(shift["day"]))
+                if not start <= shift_date <= end:
+                    continue
+                staffed = conn.execute(
+                    "SELECT COUNT(*) FROM assignments WHERE shift_id=? "
+                    "AND status NOT IN ('sick','swap_requested')",
+                    (shift["id"],)).fetchone()[0]
+                if staffed < shift["slots"]:
+                    gaps.append(f"{shift['day']} {shift['start_time']}-{shift['end_time']} "
+                                f"({shift['slots'] - staffed} open)")
+            item["coverage_gaps"] = gaps
         if r["shift_id"]:
             s = conn.execute("SELECT day, start_time, end_time FROM shifts WHERE id=?",
                              (r["shift_id"],)).fetchone()
@@ -1344,6 +1443,27 @@ def approve_request(req_id):
         notify(conn, r["user_id"], "assignment",
                f"Your day-off request for {r['day']} was approved.")
     elif r["kind"] == "vacation":
+        start = date.fromisoformat(r["vacation_start"])
+        end = date.fromisoformat(r["vacation_end"])
+        gaps = []
+        for shift in conn.execute(
+                "SELECT * FROM shifts WHERE week_start>=? AND week_start<=?",
+                (monday_of(start).isoformat(), end.isoformat())):
+            shift_date = date.fromisoformat(shift["week_start"]) + timedelta(
+                days=DAYS.index(shift["day"]))
+            if not start <= shift_date <= end:
+                continue
+            staffed = conn.execute(
+                "SELECT COUNT(*) FROM assignments WHERE shift_id=? "
+                "AND status NOT IN ('sick','swap_requested')",
+                (shift["id"],)).fetchone()[0]
+            if staffed < shift["slots"]:
+                gaps.append(f"{shift['day']} {shift['start_time']}-{shift['end_time']}")
+        if gaps:
+            conn.close()
+            flash("Vacation can't be approved until coverage is arranged for: "
+                  + ", ".join(gaps) + ".")
+            return redirect(url_for("requests"))
         conn.execute("UPDATE requests SET status='approved_ok' WHERE id=?", (req_id,))
         notify(conn, r["user_id"], "assignment",
                f"Your vacation request for {r['vacation_start']} to "
@@ -1566,15 +1686,18 @@ def add_employee():
     password = request.form.get("password", "")
     employment_type = request.form.get("employment_type", "")
     hired = request.form.get("hired_on", "").strip()
+    email = request.form.get("email", "").strip()
+    phone = request.form.get("phone", "").strip()
     try:
         weekly_hours = int(request.form.get("weekly_hours", ""))
     except ValueError:
         weekly_hours = 0
     if not username or not name or len(password) < 12 or \
             employment_type not in ("full_time", "part_time") or \
-            not 1 <= weekly_hours <= 168:
+            not 1 <= weekly_hours <= 168 or not valid_email(email) or \
+            not valid_phone(phone):
         flash("Enter a name, username, password of at least 12 characters, "
-              "employment type, and valid weekly hours.")
+              "employment type, valid weekly hours, email, and E.164 phone number (+country code).")
         return redirect(url_for("roster"))
     if hired:
         try:
@@ -1586,9 +1709,9 @@ def add_employee():
     try:
         conn.execute(
             "INSERT INTO users (username, password, name, role, weekly_hours, "
-            "employment_type, hired_on) VALUES (?,?,?,?,?,?,?)",
+            "employment_type, hired_on, email, phone) VALUES (?,?,?,?,?,?,?,?,?)",
             (username, generate_password_hash(password), name, "employee",
-             weekly_hours, employment_type, hired or None))
+             weekly_hours, employment_type, hired or None, email or None, phone or None))
         conn.commit()
     except sqlite3.IntegrityError:
         flash("That username is already in use.")
@@ -1596,6 +1719,39 @@ def add_employee():
         flash("Employee added.")
     finally:
         conn.close()
+    return redirect(url_for("roster"))
+
+
+@app.route("/manager/roster/<int:user_id>/send-link", methods=["POST"])
+@login_required(role="manager")
+def send_employee_schedule_link(user_id):
+    channel = request.form.get("channel", "")
+    if channel not in ("email", "sms"):
+        flash("Choose email or text delivery.")
+        return redirect(url_for("roster"))
+    public_url = (app.config.get("SHIFTWISE_PUBLIC_URL") or
+                  os.environ.get("SHIFTWISE_PUBLIC_URL", "")).strip().rstrip("/")
+    if not public_url.startswith("https://"):
+        flash("Set SHIFTWISE_PUBLIC_URL to the app's public HTTPS address before sending links.")
+        return redirect(url_for("roster"))
+    conn = db()
+    employee = conn.execute(
+        "SELECT name, email, phone FROM users WHERE id=? AND role='employee'",
+        (user_id,)).fetchone()
+    conn.close()
+    if not employee:
+        abort(404)
+    destination = employee["email"] if channel == "email" else employee["phone"]
+    if not destination:
+        flash(f"Add this employee's {'email address' if channel == 'email' else 'phone number'} first.")
+        return redirect(url_for("roster"))
+    try:
+        send_schedule_link(channel, destination, employee["name"],
+                           public_url + url_for("login"))
+    except (ValueError, OSError, smtplib.SMTPException, urllib.error.URLError) as exc:
+        flash(str(exc) or "Message could not be sent. Check the delivery settings.")
+    else:
+        flash(f"Schedule link sent by {'email' if channel == 'email' else 'text'} to {employee['name']}.")
     return redirect(url_for("roster"))
 
 
@@ -1651,7 +1807,7 @@ def roster():
     if request.method == "POST":
         updates = []
         for row in conn.execute(
-                "SELECT id, employment_type, hired_on, weekly_hours, station"
+                "SELECT id, employment_type, hired_on, weekly_hours, station, email, phone"
                 " FROM users WHERE role='employee'"):
             uid = row["id"]
             # Fields absent from the post keep their current values; fields
@@ -1660,6 +1816,8 @@ def roster():
             hired = request.form.get(f"hired_{uid}", row["hired_on"] or "").strip()
             cap = request.form.get(f"cap_{uid}", str(row["weekly_hours"] or "")).strip()
             station = request.form.get(f"station_{uid}", row["station"] or "front")
+            email = request.form.get(f"email_{uid}", row["email"] or "").strip()
+            phone = request.form.get(f"phone_{uid}", row["phone"] or "").strip()
             try:
                 if hired:
                     date.fromisoformat(hired)
@@ -1676,10 +1834,15 @@ def roster():
                 conn.close()
                 flash("Choose a valid station (front/back).")
                 return redirect(url_for("roster"))
-            updates.append((et, hired or None, hours_cap, station, uid))
+            if not valid_email(email) or not valid_phone(phone):
+                conn.close()
+                flash("Enter a valid email address and phone in international format (+country code).")
+                return redirect(url_for("roster"))
+            updates.append((et, hired or None, hours_cap, station,
+                            email or None, phone or None, uid))
         conn.executemany(
             "UPDATE users SET employment_type=?, hired_on=?, weekly_hours=?,"
-            " station=? WHERE id=?",
+            " station=?, email=?, phone=? WHERE id=?",
             updates)
         conn.commit()
         flash("Roster updated.")

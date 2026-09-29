@@ -20,7 +20,7 @@
   {% endif %}
 </div>
 
-<div style="display:grid; grid-template-columns:repeat(7, 1fr); gap:10px">
+<div class="cal-grid" style="display:grid; grid-template-columns:repeat(7, 1fr); gap:10px">
   {% for d in days %}
   <div class="cal-day {{ 'cal-today' if d.today }}">
     <div class="cal-head">{{ d.name }} <span class="muted" style="font-weight:400">{{ d.label }}</span></div>

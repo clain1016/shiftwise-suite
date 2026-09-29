@@ -25,6 +25,21 @@
     {% for a in c.assigned %}{{ a.name }}{% if not loop.last %}, {% endif %}{% endfor %}
   {% endif %}
 
+  {% if c.open_slots > 0 %}
+  <div style="margin-top:12px; padding:10px 12px; background:var(--bg-soft); border-radius:9px; border:1px solid var(--line)">
+    <form method="post" action="{{ url_for('manager_assign', shift_id=c.shift.id, user_id=0) }}"
+          id="override-form-{{ c.shift.id }}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+      <strong style="font-size:13px">Manager override:</strong>
+      <select name="user_id" onchange="this.form.action = this.form.action.replace(/\/0$/, '/' + this.value)">
+        <option value="" disabled selected>pick an employee…</option>
+        {% for e in employees %}<option value="{{ e.id }}">{{ e.name }} ({{ 'FOH' if e.station == 'front' else 'BOH' }})</option>{% endfor %}
+      </select>
+      <button class="btn sm">Place on this shift</button>
+    </form>
+    <span class="muted" style="font-size:12px">Places them as fixed — the auto-scheduler won't move them. Overrides approved days off. Only employees of this shift's own house can be placed.</span>
+  </div>
+  {% endif %}
+
   {% for r in c.ranks %}
   <table style="margin-top:10px">
     <tr><th colspan="4">Rank #{{ r.rank }} — {{ r.claimants|length }} claimants for {{ r.open_slots }} open slot{{ 's' if r.open_slots != 1 }}</th></tr>
@@ -39,7 +54,9 @@
       <td class="muted">{{ 'assigned' if cl.user_id in c.assigned|map(attribute='id')|list else 'waiting' }}</td>
       <td>
         {% if c.open_slots > 0 %}
-        <span class="muted">auto-assigns in lineup order</span>
+        <form method="post" action="{{ url_for('manager_assign', shift_id=c.shift.id, user_id=cl.user_id) }}" style="display:inline">
+          <button class="btn sm">Assign</button>
+        </form>
         {% else %}
         <span class="tag warn" title="Shift is full — Unassign someone to reopen a slot">full</span>
         {% endif %}

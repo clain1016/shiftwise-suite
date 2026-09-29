@@ -100,8 +100,13 @@
     box-shadow: var(--shadow);
   }
   /* ---------- tables ---------- */
+  .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
   table {
     width: 100%;
+    min-width: 640px;
     border-collapse: separate;
     border-spacing: 0;
     background: var(--card);
@@ -199,6 +204,44 @@
   .cal-time { font-size: 13px; font-weight: 700; color: var(--ink); }
   .cal-who { color: var(--dim); font-size: 12px; margin-top: 4px; }
   .cal-empty { color: var(--dim); font-size: 13px; }
+  /* ---------- mobile ---------- */
+  @media (max-width: 768px) {
+    nav { padding: 0 14px; }
+    .nav-toggle { display: block !important; }
+    .links { display: none; }
+    .nav-right { display: none; }
+    .mobile-menu {
+      position: absolute;
+      top: 60px;
+      left: 0;
+      right: 0;
+      background: var(--navy);
+      border-bottom: 1px solid var(--line);
+      padding: 14px;
+      display: none;
+      z-index: 9;
+    }
+    .mobile-menu.active { display: flex; flex-direction: column; gap: 8px; }
+    .mobile-menu a {
+      color: #9fb4cc;
+      text-decoration: none;
+      padding: 10px 14px;
+      border-radius: 7px;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .mobile-menu a:hover { background: rgba(46,124,246,.15); color: #fff; }
+    .container { padding: 0 12px; margin: 20px auto 32px; }
+    .cal-grid { grid-template-columns: 1fr 1fr 1fr !important; gap: 6px; }
+    .cal-day { min-height: 100px; padding: 6px; }
+    .cal-head { font-size: 12px; margin-bottom: 4px; }
+    .cal-shift { padding: 4px 6px; font-size: 11px; }
+  }
+  @media (max-width: 480px) {
+    .cal-grid { grid-template-columns: 1fr !important; gap: 8px; }
+    .cal-day { min-height: 120px; }
+    table { min-width: 640px; }
+  }
   /* ---------- login ---------- */
   .login-card {
     max-width: 380px;
@@ -218,7 +261,8 @@
 </head>
 <body>
 <nav>
-  <div style="display:flex; align-items:center">
+  <div style="display:flex; align-items:center; gap:10px">
+    <button class="nav-toggle" type="button" aria-label="Toggle navigation" aria-controls="mobileMenu" aria-expanded="false" style="display:none; background:none; border:none; color:var(--ink); font-size:20px; cursor:pointer; padding:6px 8px;">&#9776;</button>
     <a href="{{ url_for('dashboard') }}" style="display:flex; align-items:center; gap:11px; padding:0">
       <svg width="34" height="34" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="ShiftWise logo">
         <rect x="2" y="2" width="44" height="44" rx="11" fill="#2e7cf6"/>
@@ -237,7 +281,18 @@
       <a href="{{ url_for('requests') }}">Requests</a>
       <a href="{{ url_for('roster') }}">Roster</a>{% endif %}
     </div>
+    <div class="mobile-menu" id="mobileMenu">
+      <a href="{{ url_for('dashboard') }}">My Schedule</a>
+      <a href="{{ url_for('calendar_view') }}">Calendar</a>
+      {% if session.role == 'manager' %}<a href="{{ url_for('manager') }}">Manager</a>
+      <a href="{{ url_for('conflicts') }}">Conflicts</a>
+      <a href="{{ url_for('requests') }}">Requests</a>
+      <a href="{{ url_for('roster') }}">Roster</a>{% endif %}
+      {% if session.uid %}<a href="{{ url_for('change_password') }}">Password</a>
+      <a href="{{ url_for('logout') }}">Log out</a>{% endif %}
+    </div>
   </div>
+  <div class="nav-right">
   <div class="nav-user">
     {% if session.uid %}
     <span class="avatar">{{ session.name.split()[0][0] }}{{ session.name.split()[-1][0] }}</span>
@@ -246,7 +301,26 @@
     <a href="{{ url_for('logout') }}">Log out</a>
     {% endif %}
   </div>
+  </div>
 </nav>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  var toggle = document.querySelector('.nav-toggle');
+  var menu = document.getElementById('mobileMenu');
+  if (toggle && menu) {
+    toggle.addEventListener('click', function() {
+      menu.classList.toggle('active');
+      toggle.setAttribute('aria-expanded', menu.classList.contains('active'));
+    });
+    menu.querySelectorAll('a').forEach(function(link) {
+      link.addEventListener('click', function() {
+        menu.classList.remove('active');
+        toggle.setAttribute('aria-expanded', 'false');
+      });
+    });
+  }
+});
+</script>
 <div class="container">
   {% with messages = get_flashed_messages() %}
     {% if messages %}<div class="flash">{{ messages[0] }}</div>{% endif %}

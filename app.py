@@ -454,15 +454,16 @@ def run_scheduler(week_start, actor="system"):
             "SELECT DISTINCT user_id FROM notifications WHERE id<=? AND kind='conflict'",
             (notification_start,))}
 
-        # confirmed / pending-swap / manager-approved-switch assignments
-        # are fixed: keep the rows and seed the in-memory state with them
-        # before re-running the lineup. ('notified' rows are NOT fixed —
-        # they're regular auto-assignments and must be recomputed so a
-        # higher-priority pick can displace an earlier lower-priority one.)
+        # confirmed / manager-approved-switch / manager-set
+        # assignments are fixed: keep the rows and seed the in-memory state
+        # with them before re-running the lineup. ('notified' rows are NOT
+        # fixed — they're regular auto-assignments and must be recomputed so
+        # a higher-priority pick can displace an earlier lower-priority one.)
         fixed = conn.execute(
             f"SELECT shift_id, user_id FROM assignments WHERE shift_id IN ({ph}) "
-            "AND status='confirmed'", shift_ids).fetchall()
-        # Approved switches and arranged cover stay fixed on rebuild.
+            "AND status IN ('confirmed', 'manager_fixed')",
+            shift_ids).fetchall()
+        # Manager-approved switches and arranged cover stay fixed on rebuild.
         fixed += conn.execute(
             f"SELECT shift_id, user_id FROM assignments WHERE shift_id IN ({ph}) "
             "AND status IN ('switch_fixed','coverage_fixed')", shift_ids).fetchall()
@@ -1034,7 +1035,7 @@ def manager():
         "WHERE s.week_start=? ORDER BY u.name, p.rank", (week,)).fetchall()
     assigned = defaultdict(list)
     label = {"notified": "scheduled", "switch_fixed": "scheduled (switched)",
-             "coverage_fixed": "scheduled (covering)"}
+             "coverage_fixed": "scheduled (covering)", "manager_fixed": "MANAGER-SET"}
     for r in conn.execute(
             "SELECT a.shift_id, u.name, a.status FROM assignments a "
             "JOIN users u ON u.id=a.user_id "
@@ -1142,7 +1143,8 @@ def conflicts():
         claimants = conn.execute(
             "SELECT p.user_id, p.rank, u.name, u.employment_type, u.hired_on, "
             "u.weekly_hours, u.station FROM picks p JOIN users u ON u.id=p.user_id "
-            "WHERE p.shift_id=? ORDER BY p.rank", (s["id"],)).fetchall()
+            "WHERE p.shift_id=? AND u.station=? ORDER BY p.rank",
+            (s["id"], s["area"])).fetchall()
         if not claimants:
             continue
         assigned_rows = conn.execute(
@@ -1187,9 +1189,15 @@ def conflicts():
         "JOIN shifts s2 ON s2.id=a.shift_id WHERE s2.week_start=?)",
         (week, week)).fetchone()["c"]
     conn.close()
+    conn2 = db()
+    all_emps = conn2.execute(
+        "SELECT id, name, station FROM users WHERE role='employee' ORDER BY name"
+    ).fetchall()
+    conn2.close()
     d = date.fromisoformat(week)
     return render_template(
         "conflicts.html", conflicts=conflicts, week=week,
+        employees=all_emps,
         prev_week=(d - timedelta(days=7)).isoformat(),
         next_week=(d + timedelta(days=7)).isoformat(),
         this_week=monday_of(date.today()).isoformat(),
@@ -1217,6 +1225,75 @@ def unassign(shift_id, user_id):
     # auto-rebuild: freed slot -> re-run the lineup so the next-in-line gets it
     if deleted and shift:
         run_scheduler(shift["week_start"])
+    return redirect(url_for("conflicts"))
+
+
+@app.route("/manager/assign/<int:shift_id>/<int:user_id>", methods=["POST"])
+@login_required(role="manager")
+def manager_assign(shift_id, user_id):
+    """MANAGER OVERRIDE (user rule 2026-09): the manager can place any
+    employee onto any shift of that employee's own house, overriding the
+    auto-scheduler. The row gets status 'manager_fixed' — fixed like a
+    confirmed row, so rebuilds keep it and the lineup never re-assigns
+    that slot to someone else. If the employee was off that day
+    (day-off/vacation), the manager's placement still wins: the
+    conflicting request record is marked overridden and the employee is
+    notified that the manager needs them in."""
+    conn = db()
+    shift = conn.execute("SELECT * FROM shifts WHERE id=?", (shift_id,)).fetchone()
+    user = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    if not shift or not user or user["role"] != "employee":
+        conn.close()
+        flash("Invalid shift or employee.")
+        return redirect(url_for("conflicts"))
+    if user["station"] != shift["area"]:
+        conn.close()
+        flash(f"{user['name']} works "
+              f"{'front' if user['station'] == 'front' else 'back'} of house — "
+              "they can only be placed on shifts in their own house.")
+        return redirect(url_for("conflicts"))
+    staffed = conn.execute(
+        "SELECT COUNT(*) c FROM assignments WHERE shift_id=? "
+        "AND status NOT IN ('sick','swap_requested')",
+        (shift_id,)).fetchone()["c"]
+    if staffed >= shift["slots"] and not conn.execute(
+            "SELECT 1 FROM assignments WHERE shift_id=? AND user_id=?",
+            (shift_id, user_id)).fetchone():
+        conn.close()
+        flash(f"Can't override: {shift['day']} is already full. Unassign "
+              "someone first to reopen a slot.")
+        return redirect(url_for("conflicts"))
+    # cap/days-off checks are intentionally skipped here: the manager's
+    # explicit placement overrides the auto rules (but the placement
+    # message tells them if it breaks the employee's day-off request)
+    override_day_off = False
+    if conn.execute(
+            "SELECT 1 FROM requests WHERE user_id=? AND kind='day_off' AND "
+            "day=? AND status='approved_ok'", (user_id, shift["day"])).fetchone():
+        conn.execute(
+            "UPDATE requests SET status='overridden_by_manager' WHERE "
+            "user_id=? AND kind='day_off' AND day=? AND status='approved_ok'",
+            (user_id, shift["day"]))
+        override_day_off = True
+    # drop the employee's pick on this shift so the rebuild doesn't fight
+    # the manual placement, and place them as fixed
+    conn.execute("DELETE FROM picks WHERE user_id=? AND shift_id=?",
+                 (user_id, shift_id))
+    conn.execute("DELETE FROM assignments WHERE shift_id=? AND user_id=?",
+                 (shift_id, user_id))
+    conn.execute(
+        "INSERT INTO assignments (shift_id, user_id, status) VALUES (?,?,"
+        "'manager_fixed')", (shift_id, user_id))
+    notify(conn, user_id, "assignment",
+           f"Manager placed you on {shift['day']} "
+           f"{shift['start_time']}-{shift['end_time']}."
+           + (" This overrides a day-off you had approved." if override_day_off else ""))
+    conn.commit()
+    conn.close()
+    run_scheduler(shift["week_start"])
+    flash(f"Override: {user['name']} placed on {shift['day']} "
+          f"{shift['start_time']}-{shift['end_time']} (fixed — the "
+          "auto-scheduler won't move them).")
     return redirect(url_for("conflicts"))
 
 

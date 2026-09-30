@@ -72,10 +72,7 @@ def test_mock_smoke():
     on_front = sorted(r["username"] for r in rows if r["area"] == "front")
     on_back = sorted(r["username"] for r in rows if r["area"] == "back")
     assert not cross, f"cross-house leak: {[r['username'] for r in cross]}"
-    # FOH Mon (3 slots): FT most-senior first -> maria, devon, priya
     assert on_front == sorted(["maria", "devon", "priya"]), f"FOH Mon got {on_front}"
-    # BOH Mon (2 slots): morgan (FT 2021) then casey (PT 2023) — jordan/taylor/
-    # riley also pick Mon but lineup order decides; assert the 2 most senior
     assert len(on_back) == 2 and set(on_back) == {"morgan", "casey"}, f"BOH Mon got {on_back}"
 
 if __name__ == "__main__":

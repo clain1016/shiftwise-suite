@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Sync the mock ShiftWise twin from the real app after every feature addition.
-# Copies app.py + templates, binds on the LAN at port 5001, and (with --reseed)
-# force-reseeds the mock DB with the fake FOH/BOH roster and Mon-Sun demo week.
+# Reseed utility for the ShiftWise mock environment.
+# Note: Source code and templates are now shared directly with the root
+# application; this script provides an optional database reseed utility.
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -12,30 +12,16 @@ fi
 
 python_bin="$(cd .. && pwd)/.venv/bin/python"
 if [[ ! -x "$python_bin" ]]; then
-    echo "Missing suite virtualenv; run python3 -m venv .venv and install requirements.txt" >&2
-    exit 1
+    python_bin="python3"
 fi
-
-cp ../app.py app.py
-cp ../templates/*.html templates/
-
-# The mock runs on its own LAN listener and database. Keep these settings local to
-# the copied entry point so the scheduler logic stays identical.
-"$python_bin" - <<'PY'
-from pathlib import Path
-
-path = Path("app.py")
-source = path.read_text()
-source = source.replace('os.environ.get("SHIFTWISE_PORT", "5000")',
-                        'os.environ.get("SHIFTWISE_PORT", "5001")')
-source = source.replace('os.environ.get("SHIFTWISE_HOST", "127.0.0.1")',
-                        'os.environ.get("SHIFTWISE_HOST", "0.0.0.0")')
-path.write_text(source)
-PY
 
 if [[ "${1:-}" == "--reseed" ]]; then
     rm -f scheduler.db scheduler.db-wal scheduler.db-shm
     SHIFTWISE_DB_PATH="$PWD/scheduler.db" "$python_bin" - <<'PY'
+import sys
+from pathlib import Path
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR))
 import app
 import mock_seed
 from datetime import date
@@ -44,9 +30,11 @@ app.init_db(seed_demo=True)
 employees, days, picks = mock_seed.seed(app)
 week = mock_seed.monday_of(date.today()).isoformat()
 app.run_scheduler(week)
-print(f"mock database seeded: {employees} fake employees (FOH+BOH), "
+print(f"mock database seeded: {employees} employees (FOH+BOH), "
       f"{days} days/house, {picks} pre-seeded picks")
 PY
+    echo "mock database reseeded successfully"
+else
+    echo "Mock environment directly uses root app and templates (no file copying required)."
+    echo "To reseed the mock database, run: ./sync.sh --reseed"
 fi
-
-echo "mock source synced; restart the mock server to load it"

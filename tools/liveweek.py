@@ -85,6 +85,21 @@ def default_password(username: str) -> str:
             f"liveweek-pass-{username}" if username in EXTRA_NAMES else
             username)
 
+
+MANAGER_SEED_PASSWORDS = {"manager": "manager",
+                          "ops2": "liveweek-manager-pass"}
+
+
+def seed_password(username: str) -> str:
+    """Password the seed world assigned to this username.
+
+    Managers don't follow the employee seed convention (seed_world sets
+    ops2's password explicitly), so fresh_session must not derive theirs
+    via default_password — otherwise the second manager can never log in
+    and drills like double_review silently race with one manager.
+    """
+    return MANAGER_SEED_PASSWORDS.get(username, default_password(username))
+
 HOTSPOTS = {  # category -> suspected code locations for fixing agents
     "http_500": ["see the server traceback inside this issue; the deepest "
                  "shiftwise/ frame is the failing call site"],
@@ -834,10 +849,23 @@ def b_double_pick(ctx):
 def b_authz_probe(ctx):
     """Employee touches manager-only routes + posts without CSRF."""
     r1 = ctx.sess.post("/manager/run")
-    ok1 = r1.status < 500 and "Preferences" not in (r1.flash or "")
+    ok1 = r1.status == 403
     if r1.status >= 500:
         pass  # http_500 already recorded by session
-    ctx.sess.get("/manager")
+    elif r1.status != 403:
+        ctx.rec.issue("HIGH", "behavior_mismatch",
+                      f"{ctx.sess.actor}: employee POST to /manager/run was "
+                      f"not rejected with 403 (got {r1.status})",
+                      {"flash": r1.flash, "status": r1.status},
+                      actor=ctx.sess.actor, phase=ctx.phase,
+                      fingerprint_extra="authz_probe_run")
+    r3 = ctx.sess.get("/manager")
+    if r3.status == 200:
+        ctx.rec.issue("HIGH", "behavior_mismatch",
+                      f"{ctx.sess.actor}: employee GET /manager rendered "
+                      "the manager dashboard (expected redirect or 403)",
+                      {"status": r3.status}, actor=ctx.sess.actor,
+                      phase=ctx.phase, fingerprint_extra="authz_probe_dash")
     # missing CSRF: send raw without token header
     saved = ctx.sess.csrf
     ctx.sess.csrf = None
@@ -850,7 +878,8 @@ def b_authz_probe(ctx):
                       f"with 400 (got {r2.status})",
                       {"flash": r2.flash}, actor=ctx.sess.actor,
                       phase=ctx.phase, fingerprint_extra="csrf_probe")
-    ctx.rec.coverage_tick("authz_probe", mismatch=not (ok1 and ok2))
+    ctx.rec.coverage_tick("authz_probe",
+                          mismatch=not (ok1 and ok2 and r3.status != 200))
 
 
 def b_password_rotate(ctx, max_rotations=2):
@@ -1232,9 +1261,14 @@ def drill_sick_vs_swap(ctx):
     if not donor:
         ctx.rec.coverage_tick("drill:sick_vs_swap", skip=True)
         return
-    # act on a fresh session for this user: the ambient worker owns the
-    # original session's flash queue
-    sess = fresh_session(ctx.rec, ctx.base, ctx.world, donor.actor, ctx.phase)
+    # act on fresh sessions for this user: the ambient worker owns the
+    # original session's flash queue, and CookieJar isn't thread-safe, so
+    # each racing thread gets its own session
+    sess_sick = fresh_session(ctx.rec, ctx.base, ctx.world, donor.actor,
+                              ctx.phase)
+    sess_swap = fresh_session(ctx.rec, ctx.base, ctx.world, donor.actor,
+                              ctx.phase)
+    sess = sess_sick  # same user; used for DB queries below
     mine = ctx.world.my_ok_assignments(sess.uid)
     a = ctx.rng.choice(mine)
     bar = threading.Barrier(2)
@@ -1242,11 +1276,11 @@ def drill_sick_vs_swap(ctx):
 
     def sick():
         bar.wait()
-        out["sick"] = sess.post(f"/request/sick/{a['shift_id']}")
+        out["sick"] = sess_sick.post(f"/request/sick/{a['shift_id']}")
 
     def swap():
         bar.wait()
-        out["swap"] = sess.post(f"/swap/{a['shift_id']}")
+        out["swap"] = sess_swap.post(f"/swap/{a['shift_id']}")
 
     ths = [threading.Thread(target=sick), threading.Thread(target=swap)]
     for th in ths:
@@ -1256,16 +1290,25 @@ def drill_sick_vs_swap(ctx):
     dup = ctx.world.q(
         "SELECT COUNT(*) c FROM requests WHERE user_id=? AND shift_id=? AND "
         "kind IN ('swap','sick')", (sess.uid, a["shift_id"]))
+    n_dup = dup[0]["c"] if dup else 0
+    if n_dup > 1:
+        ctx.rec.issue("HIGH", "behavior_mismatch",
+                      "drill sick_vs_swap: both the sick call and the swap "
+                      f"created requests for the same shift ({n_dup} rows)",
+                      {"shift": a["shift_id"], "actor": sess.actor},
+                      actor=sess.actor, phase=ctx.phase, drill="sick_vs_swap",
+                      fingerprint_extra="sick_vs_swap_dup")
     row = ctx.world.one("SELECT status FROM assignments WHERE shift_id=? AND "
                         "user_id=?", (a["shift_id"], sess.uid))
-    ok = all(r.status < 500 for r in out.values() if r)
-    if not ok:
+    ok500 = all(r.status < 500 for r in out.values() if r)
+    if not ok500:
         ctx.rec.issue("CRITICAL", "http_500",
                       "drill sick_vs_swap produced a 500",
                       {"shift": a["shift_id"], "actor": sess.actor},
                       actor=sess.actor, phase=ctx.phase, drill="sick_vs_swap",
                       fingerprint_extra="sick_vs_swap")
-    ctx.rec.coverage_tick("drill:sick_vs_swap", mismatch=not ok)
+    ctx.rec.coverage_tick("drill:sick_vs_swap",
+                          mismatch=not ok500 or n_dup > 1)
 
 
 def drill_delete_shift_vs_accept(ctx):
@@ -1369,16 +1412,20 @@ def drill_roster_delete_vs_activity(ctx):
     start = date.today() + timedelta(days=3)
     out = {}
     bar = threading.Barrier(2)
+    collide = threading.Barrier(2)
 
     def vacation():
         bar.wait()
+        # second barrier: both threads fire at the same instant, a genuine
+        # collision with no sleep-based ordering
+        collide.wait()
         out["vac"] = sess.post("/request/vacation",
                                {"vac_start": start.isoformat(),
                                 "vac_end": (start + timedelta(days=2)).isoformat()})
 
     def delete():
         bar.wait()
-        time.sleep(0.01)
+        collide.wait()
         out["del"] = ctx.mgr_sessions[0].post(
             f"/manager/roster/{uid_}/delete", {"confirm": "yes"})
 
@@ -1499,7 +1546,12 @@ def fresh_session(rec, base, world, username, phase):
     their own session so concurrent ambient actions of the same user cannot
     interleave flash queues (per-session server state)."""
     s = WSession(base, rec, username, phase)
-    s.login(username, world.password(username, default_password(username)))
+    if not s.login(username, world.password(username, seed_password(username))):
+        rec.issue("HIGH", "behavior_mismatch",
+                  f"{username}: fresh_session login failed; the drill will "
+                  "run unauthenticated",
+                  {"username": username}, actor=username, phase=phase,
+                  fingerprint_extra=f"fresh_session_login:{username}")
     s.uid = world.uid(username)
     s.station = world.station(username)
     return s

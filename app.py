@@ -25,7 +25,6 @@ from werkzeug.security import check_password_hash, generate_password_hash
 import shiftwise.db as _db_mod
 from shiftwise.auth import login_required
 from shiftwise.db import (
-    DB_PATH,
     SCHEMA,
     db,
     init_db,
@@ -58,6 +57,9 @@ class _AppModule(types.ModuleType):
 
 
 sys.modules[__name__].__class__ = _AppModule
+if "DB_PATH" in sys.modules[__name__].__dict__:
+    del sys.modules[__name__].__dict__["DB_PATH"]
+
 
 __all__ = [
     "create_app",

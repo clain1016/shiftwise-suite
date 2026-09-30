@@ -208,7 +208,8 @@ flowchart TD
 
     classDef done fill:#1c5cd0,stroke:#7fd3e8,stroke-width:2px,color:#fff;
     classDef curr fill:#14294a,stroke:#4dd88a,stroke-width:2px,color:#fff;
-    class P0,P1 curr;
+    class P0,P1,P2,P3,P4,P5 done;
+    class P6 curr;
 ```
 
 ---

@@ -43,6 +43,9 @@
         {% elif st == 'manager_fixed' %}
           <span class="tag warn">manager-set</span>
           <span class="muted">placed by the manager — talk to them to change it</span>
+        {% elif st == 'swap_invited' %}
+          <span class="tag warn">swap invite pending</span>
+          <span class="muted">waiting for your coworker to accept</span>
         {% else %}
           <span class="tag ok">scheduled</span>
           <button class="btn sm ghost" formaction="{{ url_for('swap', shift_id=s.id) }}" formmethod="post">Request swap</button>
@@ -100,7 +103,7 @@
       <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
       <select name="my_shift">
-        {% for s in shifts %}{% if s.id in my_assignments and my_assignments[s.id] not in ('sick','swap_requested') %}
+        {% for s in shifts %}{% if s.id in my_assignments and my_assignments[s.id] not in ('sick','swap_requested','swap_invited') %}
         <option value="{{ s.id }}">{{ s.day }} {{ s.start_time }}–{{ s.end_time }} (mine)</option>
         {% endif %}{% endfor %}
       </select>

@@ -507,8 +507,8 @@ class ReviewFixes(unittest.TestCase):
         """Only slots a pending vacation holds open may be filled past the caps."""
         week = appmod.monday_of(date.today()).isoformat()
         conn = appmod.db()
-        for table in ("picks", "assignments", "notifications", "requests",
-                      "shifts", "users"):
+        for table in ("picks", "coverage_preferences", "assignments",
+                      "notifications", "requests", "shifts", "users"):
             conn.execute(f"DELETE FROM {table}")
         for username, station, cap in (("alex", "front", 8),
                                        ("sam", "front", 40),

@@ -61,7 +61,7 @@ client = appmod.app.test_client()
 WEEK = appmod.monday_of(date.today()).isoformat()
 DAYS = appmod.DAYS
 OK_STATUSES = ("notified", "proposed", "confirmed",
-               "switch_fixed", "manager_fixed")
+               "switch_fixed", "manager_fixed", "swap_invited")
 
 
 def q(sql, args=()):
@@ -401,7 +401,8 @@ def run_random():
     if leaks:
         for r in leaks:
             tag = ("stale by design (sick/swap row survives a house flip)"
-                   if r["status"] in ("sick", "swap_requested") else "!! LEAK !!")
+                   if r["status"] in ("sick", "swap_requested", "swap_invited")
+                   else "!! LEAK !!")
             print(f"  cross-house row: {r['username']} ({r['station']}) on "
                   f"{r['area']} {r['day']} [{r['status']}] — {tag}")
     else:

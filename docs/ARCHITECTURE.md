@@ -88,7 +88,7 @@ The helper `assignment_block_reason(conn, uid, shift)` validates four constraint
 
 When `run_scheduler` executes:
 - Existing auto-assignments (`proposed`, `notified`) are cleared and re-evaluated against the latest picks.
-- Fixed assignments (`manager_fixed` from manager overrides, `confirmed`, `switch_fixed` from approved switches, `coverage_fixed` from arranged cover) are preserved and count against the employee's hours and days.
+- Fixed assignments (`manager_fixed` from manager overrides, `confirmed`, `switch_fixed` from approved switches, `coverage_fixed` from arranged cover, `swap_invited` from a pending employee→coworker swap invite) are preserved and count against the employee's hours and days.
 - Pending `swap_requested` and `sick` assignments leave room open for other staff.
 
 ---

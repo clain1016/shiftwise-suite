@@ -109,3 +109,39 @@ class CsrfTests(unittest.TestCase):
         dashboard = employee.get("/").data.decode()
         self.assertIn("switch-form", dashboard)
         self.assertGreater(self.assert_forms_are_protected(employee, "/"), 0)
+
+    def test_employee_swap_forms_carry_a_token(self):
+        """The self-service swap form and the swap-response form are protected."""
+        week = appmod.monday_of(appmod.date.today()).isoformat()
+        conn = appmod.db()
+        users = {
+            row["username"]: row["id"] for row in conn.execute(
+                "SELECT id, username FROM users WHERE username IN ('alex','sam')")
+        }
+        shift_ids = []
+        for start, end in (("01:00", "03:00"), ("03:00", "05:00")):
+            cursor = conn.execute(
+                "INSERT INTO shifts (week_start, day, start_time, end_time, slots, area) "
+                "VALUES (?, 'Mon', ?, ?, 1, 'front')", (week, start, end))
+            shift_ids.append(cursor.lastrowid)
+        conn.executemany(
+            "INSERT INTO assignments (shift_id, user_id, status) VALUES (?, ?, 'notified')",
+            [(shift_ids[0], users["alex"]), (shift_ids[1], users["sam"])])
+        # an employee-directed swap invitation for alex, so that /my-requests
+        # renders the accept/decline form
+        conn.execute(
+            "INSERT INTO requests (user_id, kind, shift_id, target_shift_id, target_user_id, "
+            "status, created_at) VALUES (?, 'swap', ?, ?, ?, 'approved', ?)",
+            (users["sam"], shift_ids[1], shift_ids[0], users["alex"], "2026-01-01T00:00:00"))
+        conn.commit()
+        conn.close()
+
+        employee = appmod.app.test_client()
+        self.login(employee, "alex")
+        dashboard = employee.get("/").data.decode()
+        self.assertIn("request/swap", dashboard, "the swap-request form did not render")
+        self.assertGreater(self.assert_forms_are_protected(employee, "/"), 0)
+
+        history = employee.get("/my-requests").data.decode()
+        self.assertIn("/respond", history, "the swap-response form did not render")
+        self.assertGreater(self.assert_forms_are_protected(employee, "/my-requests"), 0)

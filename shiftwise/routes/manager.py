@@ -36,7 +36,8 @@ def manager():
         "WHERE s.week_start=? ORDER BY u.name, p.rank", (week,)).fetchall()
     assigned = defaultdict(list)
     label = {"notified": "scheduled", "switch_fixed": "scheduled (switched)",
-             "coverage_fixed": "scheduled (covering)", "manager_fixed": "MANAGER-SET"}
+             "coverage_fixed": "scheduled (covering)", "manager_fixed": "MANAGER-SET",
+             "swap_invited": "scheduled (swap invite pending)"}
     for r in conn.execute(
             "SELECT a.shift_id, u.name, a.status FROM assignments a "
             "JOIN users u ON u.id=a.user_id "
@@ -184,7 +185,9 @@ def requests():
 @login_required(role="manager")
 def approve_request(req_id):
     conn = db()
-    r = conn.execute("SELECT * FROM requests WHERE id=?", (req_id,)).fetchone()
+    r = conn.execute(
+        "SELECT * FROM requests WHERE id=? "
+        "AND NOT (kind='swap' AND target_user_id IS NOT NULL)", (req_id,)).fetchone()
     if not r or r["status"] != "approved":
         conn.close()
         flash("Request not found or already handled.")
@@ -307,7 +310,9 @@ def approve_request(req_id):
 @login_required(role="manager")
 def deny_request(req_id):
     conn = db()
-    r = conn.execute("SELECT * FROM requests WHERE id=?", (req_id,)).fetchone()
+    r = conn.execute(
+        "SELECT * FROM requests WHERE id=? "
+        "AND NOT (kind='swap' AND target_user_id IS NOT NULL)", (req_id,)).fetchone()
     if not r or r["status"] != "approved":
         conn.close()
         flash("Request not found or already handled.")

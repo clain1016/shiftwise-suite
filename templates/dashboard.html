@@ -17,6 +17,7 @@
 {% if session.role == 'employee' %}
 <p class="muted" style="margin-bottom:14px">You're on the <strong>{{ 'front of house' if my_station == 'front' else 'back of house' }}</strong> schedule — you only see and rank shifts for your own house.</p>
 <form method="post" action="{{ url_for('pick') }}">
+<input type="hidden" name="_csrf" value="{{ csrf_token() }}">
 <div class="table-wrap">
 <table>
   <tr><th>Day</th><th>Time</th><th>Staffed</th><th>Status / your pick</th><th>Your rank</th></tr>
@@ -70,6 +71,7 @@
   <div class="card" style="flex:1; min-width:260px">
     <h2 style="margin-top:4px">Request a day off</h2>
     <form method="post" action="{{ url_for('request_day_off') }}" style="display:flex; gap:8px; align-items:center">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
       <select name="day">{% for d in DAYS %}<option>{{ d }}</option>{% endfor %}</select>
       <button class="btn sm ghost">Request day off</button>
     </form>
@@ -78,6 +80,7 @@
   <div class="card" style="flex:1; min-width:280px">
     <h2 style="margin-top:4px">Request vacation</h2>
     <form method="post" action="{{ url_for('request_vacation') }}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
       <input type="date" name="vac_start" required>
       <span class="muted">to</span>
       <input type="date" name="vac_end" required>
@@ -90,6 +93,7 @@
     {% if my_assignments %}
     <form method="post" action="" id="switch-form"
           onsubmit="this.action = '/request/switch/' + this.elements['my_shift'].value">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
       <select name="my_shift">
         {% for s in shifts %}{% if s.id in my_assignments and my_assignments[s.id] not in ('sick','swap_requested') %}

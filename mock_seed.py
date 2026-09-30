@@ -71,7 +71,7 @@ def seed(appmod):
     site is immediately testable without manual input.
     """
     conn = appmod.db()
-    for table in ("picks", "assignments", "notifications", "requests", "shifts", "users"):
+    for table in ("picks", "assignments", "notifications", "requests", "login_attempts", "shifts", "users"):
         conn.execute(f"DELETE FROM {table}")
     conn.executemany(
         "INSERT INTO users (username, password, name, role, weekly_hours,"

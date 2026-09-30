@@ -29,6 +29,7 @@ sys.path.insert(0, str(ROOT_DIR))
 
 import app as appmod
 import mock_seed
+from shiftwise.security import use_csrf_aware_test_client
 
 if len(sys.argv) > 1 and sys.argv[1].endswith(".db"):
     db_target = Path(sys.argv[1]).resolve()
@@ -46,12 +47,13 @@ for suffix in ("", "-wal", "-shm"):
 
 appmod.init_db(seed_demo=True)
 conn = sqlite3.connect(appmod.DB_PATH)
-for t in ("users", "shifts", "picks", "assignments", "notifications", "requests"):
+for t in ("users", "shifts", "picks", "assignments", "notifications", "requests", "login_attempts"):
     conn.execute(f"DELETE FROM {t}")
 conn.commit()
 conn.close()
 mock_seed.seed(appmod)
 
+use_csrf_aware_test_client(appmod.app)
 client = appmod.app.test_client()
 DAYS = appmod.DAYS
 week = appmod.monday_of(appmod.date.today()).isoformat()

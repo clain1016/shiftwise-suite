@@ -3,7 +3,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 from shiftwise.db import db
-from shiftwise.domain.constants import MIN_DAYS_OFF
+from shiftwise.domain.constants import DAYS, MIN_DAYS_OFF
 from shiftwise.domain.rules import (
     assignment_block_reason,
     priority_key,
@@ -14,6 +14,24 @@ from shiftwise.notify import notify
 from shiftwise.scheduler.coverage import coverage_plan
 
 
+def _vacated_by_pending_vacation(conn, shift):
+    """True when a pending vacation is holding a slot on this shift open.
+
+    Only these gaps may be backfilled by someone who would otherwise exceed
+    their weekly hours or days-off limit: the vacation created the gap, and
+    the manager already reviews that request knowing the cover may go over.
+    Gaps from anything else (sick calls, unfilled picks) stay inside the caps.
+    """
+    shift_date = (date.fromisoformat(shift["week_start"]) +
+                  timedelta(days=DAYS.index(shift["day"]))).isoformat()
+    return conn.execute(
+        "SELECT 1 FROM requests r JOIN users u ON u.id=r.user_id "
+        "WHERE r.kind='vacation' AND r.status='approved' "
+        "AND r.vacation_start<=? AND r.vacation_end>=? "
+        "AND u.role='employee' AND u.station=? LIMIT 1",
+        (shift_date, shift_date, shift["area"])).fetchone() is not None
+
+
 def run_scheduler(week_start, actor="system"):
     """Assign picks to shifts across the week.
 
@@ -22,7 +40,9 @@ def run_scheduler(week_start, actor="system"):
     (earliest hire date first). In round N every employee claims their
     rank-N pick; contested slots go to the highest-priority employee in
     line. Employees are never scheduled past their weekly hours cap
-    (full-time default 40h, part-time as set on the roster). If a slot is
+    (full-time default 40h, part-time as set on the roster), with one
+    exception: a slot a pending vacation is holding open may be offered to
+    an over-cap coverer so the manager can review it. If a slot is
     full, the employee falls through to their next pick — the best
     available alternative on their ranked list — and gets a notification
     explaining the fallback. When their whole list is exhausted they get a
@@ -43,11 +63,10 @@ def run_scheduler(week_start, actor="system"):
         shift_ids = [s["id"] for s in shifts]
         if not shift_ids:
             return 0
-        week_end = (date.fromisoformat(week_start) + timedelta(days=6)).isoformat()
-        vacation_review = conn.execute(
-            "SELECT 1 FROM requests WHERE kind='vacation' AND status='approved' "
-            "AND vacation_start<=? AND vacation_end>=? LIMIT 1",
-            (week_end, week_start)).fetchone() is not None
+        # Slots a pending vacation holds open are the only ones that may be
+        # backfilled over the hours/days limits — see the helper above.
+        vacation_gap = {s["id"]: _vacated_by_pending_vacation(conn, s)
+                        for s in shifts}
         ph = ",".join("?" * len(shift_ids))
         shift_by_id = {s["id"]: s for s in shifts}
         unavailable = {s["id"]: unavailable_uids(conn, s) for s in shifts}
@@ -198,7 +217,7 @@ def run_scheduler(week_start, actor="system"):
                 for _ in range(open_n):
                     cover_uid = coverage_plan(
                         conn, week_start, s["id"], None,
-                        allow_over_limits=vacation_review)
+                        allow_over_limits=vacation_gap[s["id"]])
                     if cover_uid is None:
                         mgr = conn.execute(
                             "SELECT id FROM users WHERE role='manager'").fetchone()
@@ -232,7 +251,7 @@ def run_scheduler(week_start, actor="system"):
                            f"{s['start_time']}-{s['end_time']} (covering an "
                            "open slot)." + (" This vacation option may exceed "
                            "your weekly hours or workday limit; check with your "
-                           "manager before confirming." if vacation_review else ""))
+                           "manager before confirming." if vacation_gap[s["id"]] else ""))
 
         # Once a replacement fills an unresolved swap's slot, clear the
         # original holder and close the request.

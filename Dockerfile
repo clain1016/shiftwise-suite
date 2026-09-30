@@ -17,6 +17,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=shiftwise:shiftwise app.py mock_seed.py docker-entrypoint.sh ./
+COPY --chown=shiftwise:shiftwise shiftwise ./shiftwise
 COPY --chown=shiftwise:shiftwise templates ./templates
 
 RUN chmod +x /app/docker-entrypoint.sh

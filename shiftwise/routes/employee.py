@@ -1,0 +1,313 @@
+"""Employee self-service routes: dashboard, picks, swaps, and time-off requests."""
+from collections import defaultdict
+from datetime import date, datetime
+
+from flask import (
+    Blueprint,
+    abort,
+    flash,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
+
+from shiftwise.auth import login_required
+from shiftwise.db import db, monday_of
+from shiftwise.domain.constants import DAYS
+from shiftwise.notify import notify
+from shiftwise.scheduler.coverage import apply_sick, coverage_plan
+from shiftwise.scheduler.engine import run_scheduler
+
+employee_bp = Blueprint("employee", __name__)
+
+
+@employee_bp.route("/")
+@login_required()
+def dashboard():
+    conn = db()
+    week = monday_of(date.today()).isoformat()
+    my = conn.execute("SELECT * FROM users WHERE id=?", (session["uid"],)).fetchone()
+    # employees only see (and pick) shifts in their own house — FOH and BOH
+    # are two separate schedules; managers see everything.
+    if session["role"] == "manager":
+        shifts = conn.execute(
+            "SELECT * FROM shifts WHERE week_start=? ORDER BY id", (week,)).fetchall()
+    else:
+        shifts = conn.execute(
+            "SELECT * FROM shifts WHERE week_start=? AND area=? ORDER BY id",
+            (week, my["station"])).fetchall()
+    my_assignments = {}
+    for r in conn.execute(
+            "SELECT shift_id, status FROM assignments WHERE user_id=?", (session["uid"],)):
+        my_assignments[r["shift_id"]] = r["status"]
+    my_picks = {r["shift_id"]: r["rank"] for r in conn.execute(
+        "SELECT shift_id, rank FROM picks WHERE user_id=?", (session["uid"],))}
+    # who is on each shift + remaining capacity (sick rows don't count as staff)
+    roster = defaultdict(list)
+    for r in conn.execute(
+            "SELECT a.shift_id, u.name FROM assignments a JOIN users u ON u.id=a.user_id "
+            "WHERE a.status NOT IN ('sick','swap_requested')"):
+        roster[r["shift_id"]].append(r["name"])
+    notifs = conn.execute(
+        "SELECT * FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 20",
+        (session["uid"],)).fetchall()
+    conn.execute("UPDATE notifications SET read=1 WHERE user_id=?", (session["uid"],))
+    conn.commit()
+    conn.close()
+    return render_template("dashboard.html", shifts=shifts, DAYS=DAYS, week=week,
+                           my_assignments=my_assignments, my_picks=my_picks,
+                           my_station=my["station"], roster=roster, notifs=notifs)
+
+
+@employee_bp.route("/pick", methods=["POST"])
+@login_required()
+def pick():
+    if session["role"] != "employee":
+        flash("Picks are for employees — managers don't schedule themselves.")
+        return redirect(url_for("dashboard"))
+    conn = db()
+    uid = session["uid"]
+    week = monday_of(date.today()).isoformat()
+    my_station = conn.execute("SELECT station FROM users WHERE id=?", (uid,)).fetchone()
+    week_shifts = [r["id"] for r in conn.execute(
+        "SELECT id FROM shifts WHERE week_start=? AND area=?",
+        (week, my_station["station"] if my_station else "front"))]
+    ranked = []
+    missing = []
+    for sid in week_shifts:
+        r = request.form.get(f"rank_{sid}")
+        if r and r.isdigit() and 1 <= int(r) <= len(week_shifts):
+            ranked.append((int(r), int(sid)))
+        else:
+            missing.append(sid)
+    if missing:
+        conn.close()
+        flash("Rank ALL shifts (1 = top choice) — every shift needs a "
+              "backup so any shift can be covered if plans change.")
+        return redirect(url_for("dashboard"))
+    # ranks must be 1..N with no gaps or duplicates
+    if sorted(int(r) for r, _ in ranked) != list(range(1, len(week_shifts) + 1)):
+        conn.close()
+        flash("Use each rank 1–" + str(len(week_shifts)) + " exactly once "
+              "(1 = top choice) so every shift has a backup.")
+        return redirect(url_for("dashboard"))
+    conn.execute("DELETE FROM picks WHERE user_id=?", (uid,))
+    for rank, sid in ranked:
+        conn.execute("INSERT OR REPLACE INTO picks (user_id, shift_id, rank) VALUES (?,?,?)",
+                     (uid, sid, rank))
+    conn.commit()
+    conn.close()
+    flash("Preferences saved. Shifts are assigned automatically by seniority "
+          "and full-time priority.")
+    # auto-rebuild: fresh picks -> re-run the lineup immediately
+    run_scheduler(week)
+    return redirect(url_for("dashboard"))
+
+
+@employee_bp.route("/swap/<int:shift_id>", methods=["POST"])
+@login_required()
+def swap(shift_id):
+    """Arrange an eligible cover or leave the slot open for manager review."""
+    conn = db()
+    uid = session["uid"]
+    a = conn.execute(
+        "SELECT * FROM assignments WHERE shift_id=? AND user_id=?",
+        (shift_id, uid)).fetchone()
+    if not a or a["status"] in ("sick", "swap_requested"):
+        conn.close()
+        flash("That shift can't be swapped right now.")
+        return redirect(url_for("dashboard"))
+    actor_rebuild = True  # rebuild after commit so it sees the deletions
+    shift = conn.execute("SELECT * FROM shifts WHERE id=?", (shift_id,)).fetchone()
+    cover_uid = coverage_plan(conn, shift["week_start"], shift_id, uid)
+    if cover_uid:
+        # fully replace the requester: row + pick gone, coverer in
+        conn.execute("DELETE FROM assignments WHERE shift_id=? AND user_id=?",
+                     (shift_id, uid))
+        conn.execute("DELETE FROM picks WHERE user_id=? AND shift_id=?",
+                     (uid, shift_id))
+        conn.execute(
+            "INSERT OR IGNORE INTO assignments (shift_id, user_id) VALUES (?,?)",
+            (shift_id, cover_uid))
+        conn.execute(
+            "UPDATE assignments SET status='coverage_fixed' WHERE shift_id=? AND user_id=? "
+            "AND status='proposed'", (shift_id, cover_uid))
+        conn.execute(
+            "INSERT INTO requests (user_id, kind, shift_id, status, created_at) "
+            "VALUES (?,?,?,?,?)",
+            (uid, "swap", shift_id, "approved_ok",
+             datetime.now().isoformat(timespec="seconds")))
+        coverer = conn.execute("SELECT name FROM users WHERE id=?", (cover_uid,)).fetchone()
+        notify(conn, cover_uid, "assignment",
+               f"Coverage: you're now on {shift['day']} "
+               f"{shift['start_time']}-{shift['end_time']} (covering a swap).")
+        notify(conn, uid, "assignment",
+               f"Swap covered: {coverer['name']} is taking your {shift['day']} "
+               f"{shift['start_time']}-{shift['end_time']} shift.")
+        flash(f"Swap arranged — {coverer['name']} is covering that shift.")
+    else:
+        conn.execute("UPDATE assignments SET status='swap_requested' "
+                     "WHERE shift_id=? AND user_id=?", (shift_id, uid))
+        conn.execute(
+            "INSERT INTO requests (user_id, kind, shift_id, status, created_at) "
+            "VALUES (?,?,?,?,?)",
+            (uid, "swap", shift_id, "approved",
+             datetime.now().isoformat(timespec="seconds")))
+        mgr = conn.execute("SELECT id FROM users WHERE role='manager'").fetchone()
+        if mgr:
+            notify(conn, mgr["id"], "swap_request",
+                   f"{session['name']} requested a swap for {shift['day']} "
+                   f"{shift['start_time']}-{shift['end_time']} but nobody can "
+                   "cover it — needs manual coverage.")
+        flash("Swap requested, but nobody is available to cover — the manager "
+              "has been alerted.")
+    # commit FIRST so the rebuild sees the deletions, then rebuild
+    conn.commit()
+    if actor_rebuild:
+        run_scheduler(shift["week_start"])
+    conn.close()
+    return redirect(url_for("dashboard"))
+
+
+@employee_bp.route("/request/vacation", methods=["POST"])
+@login_required()
+def request_vacation():
+    if session["role"] != "employee":
+        abort(403)
+    vstart = request.form.get("vac_start", "").strip()
+    vend = request.form.get("vac_end", "").strip()
+    try:
+        vs = date.fromisoformat(vstart)
+        ve = date.fromisoformat(vend)
+    except ValueError:
+        flash("Enter both dates as YYYY-MM-DD.")
+        return redirect(url_for("dashboard"))
+    if ve < vs:
+        flash("Vacation end must be on or after the start.")
+        return redirect(url_for("dashboard"))
+    now = date.today()
+    if vs < now:
+        flash("Vacation can't start in the past.")
+        return redirect(url_for("dashboard"))
+    conn = db()
+    uid = session["uid"]
+    conn.execute(
+        "INSERT INTO requests (user_id, kind, vacation_start, vacation_end, created_at) "
+        "VALUES (?,?,?,?,?)",
+        (uid, "vacation", vs.isoformat(), ve.isoformat(),
+         datetime.now().isoformat(timespec="seconds")))
+    affected_weeks = [r["week_start"] for r in conn.execute(
+        "SELECT DISTINCT week_start FROM shifts WHERE week_start>=? AND week_start<=?",
+        (monday_of(vs).isoformat(), ve.isoformat()))]
+    mgr = conn.execute("SELECT id FROM users WHERE role='manager'").fetchone()
+    if mgr:
+        notify(conn, mgr["id"], "swap_request",
+               f"{session['name']} requested vacation {vs.isoformat()} to "
+               f"{ve.isoformat()}.")
+    conn.commit()
+    conn.close()
+    for week in affected_weeks:
+        run_scheduler(week)
+    flash(f"Vacation requested {vs.isoformat()} to {ve.isoformat()}.")
+    return redirect(url_for("dashboard"))
+
+
+@employee_bp.route("/request/day_off", methods=["POST"])
+@login_required()
+def request_day_off():
+    if session["role"] != "employee":
+        abort(403)
+    day = request.form.get("day", "")
+    if day not in DAYS:
+        flash("Pick a valid day.")
+        return redirect(url_for("dashboard"))
+    conn = db()
+    uid = session["uid"]
+    week = monday_of(date.today()).isoformat()
+    existing = conn.execute(
+        "SELECT 1 FROM requests WHERE user_id=? AND kind='day_off' "
+        "AND week_start=? AND day=? AND status IN ('approved', 'approved_ok')",
+        (uid, week, day)).fetchone()
+    if existing:
+        conn.close()
+        flash(f"You already have an active request for {day} off.")
+        return redirect(url_for("dashboard"))
+    conn.execute(
+        "INSERT INTO requests (user_id, kind, day, week_start, created_at) "
+        "VALUES (?,?,?,?,?)",
+        (uid, "day_off", day, week, datetime.now().isoformat(timespec="seconds")))
+    mgr = conn.execute("SELECT id FROM users WHERE role='manager'").fetchone()
+    if mgr:
+        notify(conn, mgr["id"], "swap_request",
+               f"{session['name']} requested {day} off.")
+    conn.commit()
+    conn.close()
+    run_scheduler(week)
+    flash(f"Day off requested for {day}.")
+    return redirect(url_for("dashboard"))
+
+
+@employee_bp.route("/request/sick/<int:shift_id>", methods=["POST"])
+@login_required()
+def request_sick(shift_id):
+    if session["role"] != "employee":
+        abort(403)
+    conn = db()
+    ok = apply_sick(conn, session["uid"], shift_id)
+    conn.commit()
+    conn.close()
+    flash("Sick call logged — coverage has been arranged."
+          if ok else "Sick call logged.")
+    return redirect(url_for("dashboard"))
+
+
+@employee_bp.route("/request/switch/<int:shift_id>", methods=["POST"])
+@login_required()
+def request_switch(shift_id):
+    if session["role"] != "employee":
+        abort(403)
+    target = request.form.get("target_shift")
+    if not target or not target.isdigit():
+        flash("Choose the shift you want to switch into.")
+        return redirect(url_for("dashboard"))
+    conn = db()
+    uid = session["uid"]
+    mine = conn.execute(
+        "SELECT a.id, s.week_start FROM assignments a JOIN shifts s ON s.id=a.shift_id "
+        "WHERE a.shift_id=? AND a.user_id=? "
+        "AND a.status NOT IN ('sick','swap_requested')",
+        (shift_id, uid)).fetchone()
+    if not mine:
+        conn.close()
+        flash("That's not one of your shifts.")
+        return redirect(url_for("dashboard"))
+    target_row = conn.execute("SELECT * FROM shifts WHERE id=?", (int(target),)).fetchone()
+    if not target_row or target_row["id"] == shift_id or \
+            target_row["week_start"] != mine["week_start"]:
+        conn.close()
+        flash("Choose another shift in the same week.")
+        return redirect(url_for("dashboard"))
+    me = conn.execute("SELECT station FROM users WHERE id=?", (uid,)).fetchone()
+    if me and target_row["area"] != me["station"]:
+        conn.close()
+        flash("Switches stay within your own house — you can't switch onto the other schedule.")
+        return redirect(url_for("dashboard"))
+    conn.execute(
+        "INSERT INTO requests (user_id, kind, shift_id, target_shift_id, created_at) "
+        "VALUES (?,?,?,?,?)",
+        (uid, "switch", shift_id, int(target),
+         datetime.now().isoformat(timespec="seconds")))
+    mgr = conn.execute("SELECT id FROM users WHERE role='manager'").fetchone()
+    if mgr:
+        t = conn.execute("SELECT day, start_time, end_time FROM shifts WHERE id=?",
+                         (shift_id,)).fetchone()
+        notify(conn, mgr["id"], "swap_request",
+               f"{session['name']} wants to switch their {t['day']} "
+               f"{t['start_time']}-{t['end_time']} shift for "
+               f"{target_row['day']} {target_row['start_time']}-{target_row['end_time']}.")
+    conn.commit()
+    conn.close()
+    flash("Switch request sent — the manager will review it.")
+    return redirect(url_for("dashboard"))

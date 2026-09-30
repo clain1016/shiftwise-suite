@@ -1,6 +1,7 @@
 """Employee self-service routes: dashboard, picks, swaps, and time-off requests."""
 from collections import defaultdict
 from datetime import date, datetime
+import sqlite3
 
 from flask import (
     Blueprint,
@@ -12,16 +13,90 @@ from flask import (
     session,
     url_for,
 )
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from shiftwise.auth import login_required
 from shiftwise.db import db, monday_of
 from shiftwise.domain.constants import DAYS
-from shiftwise.domain.rules import assignment_block_reason
+from shiftwise.domain.rules import assignment_block_reason, valid_email
 from shiftwise.notify import notify
 from shiftwise.scheduler.coverage import apply_sick, coverage_plan
 from shiftwise.scheduler.engine import run_scheduler
 
 employee_bp = Blueprint("employee", __name__)
+
+
+@employee_bp.route("/settings", methods=["GET", "POST"])
+@login_required()
+def settings():
+    conn = db()
+    uid = session["uid"]
+    if request.method == "POST":
+        action = request.form.get("action", "clock")
+        if action == "profile":
+            name = request.form.get("name", "").strip()
+            username = request.form.get("username", "").strip()
+            email = request.form.get("email", "").strip()
+            if not name or not username:
+                conn.close()
+                flash("Enter a display name and username.")
+                return redirect(url_for("settings"))
+            if not valid_email(email):
+                conn.close()
+                flash("Enter a valid email address.")
+                return redirect(url_for("settings"))
+            try:
+                conn.execute(
+                    "UPDATE users SET name=?, username=?, email=? WHERE id=?",
+                    (name, username, email or None, uid),
+                )
+                conn.commit()
+            except sqlite3.IntegrityError:
+                conn.close()
+                flash("That username is already in use.")
+                return redirect(url_for("settings"))
+            conn.close()
+            session["name"] = name
+            flash("Account details saved.")
+            return redirect(url_for("settings"))
+        if action == "password":
+            current_password = request.form.get("current_password", "")
+            new_password = request.form.get("new_password", "")
+            user = conn.execute(
+                "SELECT password FROM users WHERE id=?", (uid,)
+            ).fetchone()
+            if not user or not check_password_hash(user["password"], current_password):
+                conn.close()
+                flash("Current password is incorrect.")
+                return redirect(url_for("settings") + "#password")
+            if len(new_password) < 12:
+                conn.close()
+                flash("Use a new password of at least 12 characters.")
+                return redirect(url_for("settings") + "#password")
+            conn.execute(
+                "UPDATE users SET password=? WHERE id=?",
+                (generate_password_hash(new_password), uid),
+            )
+            conn.commit()
+            conn.close()
+            session.clear()
+            flash("Password changed. Sign in again.")
+            return redirect(url_for("login"))
+        time_format = request.form.get("time_format", "")
+        if time_format not in ("12h", "24h"):
+            conn.close()
+            flash("Choose either 12-hour or 24-hour time.")
+            return redirect(url_for("settings"))
+        conn.execute("UPDATE users SET time_format=? WHERE id=?", (time_format, uid))
+        conn.commit()
+        conn.close()
+        flash("Clock format saved.")
+        return redirect(url_for("settings"))
+    user = conn.execute(
+        "SELECT name, username, email, time_format FROM users WHERE id=?", (uid,)
+    ).fetchone()
+    conn.close()
+    return render_template("settings.html", user=user, time_format=user["time_format"])
 
 
 @employee_bp.route("/")
@@ -118,7 +193,9 @@ def pick():
         return redirect(url_for("dashboard"))
     conn.execute("DELETE FROM picks WHERE user_id=?", (uid,))
     for sid in week_shifts:
-        willingness = request.form.get(f"cover_{sid}")
+        cover_values = request.form.getlist(f"cover_{sid}")
+        willingness = ("yes" if "yes" in cover_values else
+                       "no" if "no" in cover_values else None)
         if willingness in ("yes", "no"):
             conn.execute(
                 "INSERT INTO coverage_preferences (user_id, shift_id, willing) VALUES (?,?,?) "

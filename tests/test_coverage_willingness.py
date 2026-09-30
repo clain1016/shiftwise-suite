@@ -15,7 +15,7 @@ def test_employee_coverage_willingness_is_saved_and_honored(isolated_db):
         "SELECT id FROM shifts WHERE week_start=? AND area='front' ORDER BY id", (week,)
     )]
     alex_id = conn.execute("SELECT id FROM users WHERE username='alex'").fetchone()["id"]
-    conn.execute("UPDATE users SET station='back' WHERE username IN ('sam','taylor')")
+    conn.execute("UPDATE users SET station='back' WHERE role='employee' AND id!=?", (alex_id,))
     conn.commit()
     conn.close()
     assert len(shift_ids) >= 2
@@ -45,5 +45,10 @@ def test_employee_coverage_willingness_is_saved_and_honored(isolated_db):
     conn.close()
 
     page = client.get("/")
-    assert b"Willing to cover" in page.data
-    assert b">Yes<" in page.data and b">No<" in page.data
+    text = page.data
+    assert b"Your rank" in text
+    assert b"Availability to cover" in text
+    assert text.index(b"</table>") < text.index(b"Availability to cover")
+    assert b"Willing to cover" not in text
+    assert b"Monday" in text and b"Sunday" in text
+    assert b'type="checkbox" name="cover_' in text

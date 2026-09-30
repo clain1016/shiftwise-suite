@@ -244,6 +244,12 @@
     border-color: var(--accent);
   }
   .muted { color: var(--dim); font-size: 13px; }
+  .availability-section { margin: 18px 0; }
+  .availability-day { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; padding: 10px 12px; }
+  .availability-day legend { color: var(--ink); font-weight: 700; padding: 0 6px; }
+  .availability-options { display: flex; flex-wrap: wrap; gap: 8px; }
+  .availability-option { display: flex; align-items: center; gap: 9px; min-height: 44px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-soft); cursor: pointer; }
+  .availability-option input[type="checkbox"] { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
 
   /* ---------- notifications ---------- */
   .notif {
@@ -841,6 +847,7 @@
       <a href="{{ url_for('conflicts') }}" class="{{ 'active' if request.endpoint == 'conflicts' }}">Conflicts</a>
       <a href="{{ url_for('requests') }}" class="{{ 'active' if request.endpoint == 'requests' }}">Requests</a>
       <a href="{{ url_for('roster') }}" class="{{ 'active' if request.endpoint == 'roster' }}">Roster</a>{% endif %}
+      {% if session.uid %}<a href="{{ url_for('settings') }}" class="{{ 'active' if request.endpoint == 'settings' }}">Settings</a>{% endif %}
     </div>
   </div>
   <div class="nav-right">
@@ -848,7 +855,6 @@
     {% if session.uid %}
     <span class="avatar">{{ session.name.split()[0][0] }}{{ session.name.split()[-1][0] }}</span>
     <span class="nav-user">{{ session.name }}</span>
-    <a href="{{ url_for('change_password') }}">Password</a>
     <a href="{{ url_for('logout') }}">Log out</a>
     {% endif %}
   </div>
@@ -872,8 +878,8 @@
   <a href="{{ url_for('roster') }}" class="{{ 'active' if request.endpoint == 'roster' }}">Roster</a>{% endif %}
   {% if session.uid %}
   <hr>
-  <a href="{{ url_for('change_password') }}">Change password</a>
   <a href="{{ url_for('logout') }}" style="color:var(--warn)">Log out</a>
+  <a href="{{ url_for('settings') }}" class="{{ 'active' if request.endpoint == 'settings' }}">Settings</a>
   {% endif %}
 </div>
 <script>

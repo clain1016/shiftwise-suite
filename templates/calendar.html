@@ -37,7 +37,7 @@
     </div>
     {% for s in d.shifts %}
     <div class="cal-shift {{ 'cal-mine' if s.mine }}">
-      <div class="cal-time">{{ s.time }}</div>
+      <div class="cal-time">{{ s.start_time|clock_time(time_format) }}–{{ s.end_time|clock_time(time_format) }}</div>
       {% if s.note %}<div class="muted">{{ s.note }}</div>{% endif %}
       {% if s.mine %}
         <span class="tag {{ 'warn' if s.status in ('swap_requested', 'sick', 'swap_invited') else 'ok' }}">

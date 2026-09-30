@@ -28,7 +28,7 @@
   {% for s in front_shifts %}
   <tr>
     <td data-label="Day"><strong>{{ s.day }}</strong>{% if s.note %} <span class="muted">· {{ s.note }}</span>{% endif %}</td>
-    <td data-label="Time"><span class="tag dim">{{ s.start_time }}–{{ s.end_time }}</span></td>
+    <td data-label="Time"><span class="tag dim">{{ s.start_time|clock_time(time_format) }}–{{ s.end_time|clock_time(time_format) }}</span></td>
     <td data-label="Slots">
       {% set n = assigned[s.id]|length %}
       {% if n < s.slots %}<span class="tag warn">{{ n }}/{{ s.slots }}</span>
@@ -59,7 +59,7 @@
   {% for s in back_shifts %}
   <tr>
     <td data-label="Day"><strong>{{ s.day }}</strong>{% if s.note %} <span class="muted">· {{ s.note }}</span>{% endif %}</td>
-    <td data-label="Time"><span class="tag dim">{{ s.start_time }}–{{ s.end_time }}</span></td>
+    <td data-label="Time"><span class="tag dim">{{ s.start_time|clock_time(time_format) }}–{{ s.end_time|clock_time(time_format) }}</span></td>
     <td data-label="Slots">
       {% set n = assigned[s.id]|length %}
       {% if n < s.slots %}<span class="tag warn">{{ n }}/{{ s.slots }}</span>
@@ -88,7 +88,7 @@
 <table>
   <tr><th>Employee</th><th>Rank</th><th>Shift</th></tr>
   {% for p in picks %}
-  <tr><td data-label="Employee"><strong>{{ p.name }}</strong></td><td data-label="Rank"><span class="tag dim">#{{ p.rank }}</span></td><td data-label="Shift">{{ p.day }} {{ p.start_time }}–{{ p.end_time }}</td></tr>
+  <tr><td data-label="Employee"><strong>{{ p.name }}</strong></td><td data-label="Rank"><span class="tag dim">#{{ p.rank }}</span></td><td data-label="Shift">{{ p.day }} {{ p.start_time|clock_time(time_format) }}–{{ p.end_time|clock_time(time_format) }}</td></tr>
   {% else %}
   <tr><td colspan="3" class="muted">No picks yet.</td></tr>
   {% endfor %}

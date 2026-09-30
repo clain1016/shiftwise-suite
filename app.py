@@ -5,6 +5,7 @@ re-exports all domain functions, database helpers, and constants so existing
 tests, scripts, and deployment configurations continue to work without modification.
 """
 import os
+import importlib
 import smtplib
 import sys
 import types
@@ -27,7 +28,7 @@ from flask import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
-import shiftwise.db as _db_mod
+_db_mod = importlib.import_module("shiftwise.db")
 from shiftwise.auth import login_required
 from shiftwise.db import (
     SCHEMA,
@@ -54,14 +55,17 @@ from shiftwise import app, create_app
 class _AppModule(types.ModuleType):
     """Custom module wrapper to synchronize DB_PATH mutations across packages."""
 
-    @property
-    def DB_PATH(self):
-        return _db_mod.DB_PATH
+    def __getattribute__(self, name):
+        if name == "DB_PATH":
+            return _db_mod.DB_PATH
+        return super().__getattribute__(name)
 
-    @DB_PATH.setter
-    def DB_PATH(self, val):
-        p = Path(val) if val is not None else val
-        _db_mod.DB_PATH = p
+    def __setattr__(self, name, val):
+        if name == "DB_PATH":
+            _db_mod.DB_PATH = Path(val) if val is not None else val
+            self.__dict__.pop("DB_PATH", None)
+            return
+        super().__setattr__(name, val)
 
 
 sys.modules[__name__].__class__ = _AppModule

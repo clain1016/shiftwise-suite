@@ -78,6 +78,13 @@ All test suites use isolated temporary SQLite databases:
 # Run the randomized house-chaos simulation
 .venv/bin/python tools/scenario_random.py
 
+# Run the live-week concurrency gauntlet: 15 employees + 2 managers driving
+# the app over real HTTP against an isolated SQLite DB. Surfaces database,
+# concurrency, and collision issues; writes agent-ready artifacts (issues,
+# logs, snapshots, reports) to tools/liveweek-artifacts/run-*/
+.venv/bin/python tools/liveweek.py                 # default 120s ambient phase
+.venv/bin/python tools/liveweek.py --strict        # exit non-zero on findings
+
 # Run all tests and simulations in one command
 ./tools/run_all.sh
 ```

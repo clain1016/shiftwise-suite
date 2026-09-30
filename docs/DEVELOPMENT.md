@@ -109,6 +109,38 @@ A randomized property-based chaos harness:
 .venv/bin/python tools/scenario_random.py <seed>
 ```
 
+### 4. Live-Week Concurrency Gauntlet (`tools/liveweek.py`)
+A full work-week simulation under real concurrency. Boots a threaded WSGI
+server on an isolated SQLite database and drives it with actual HTTP clients:
+15 employee sessions and 2 manager sessions running the complete action
+matrix (ranked picks, coverage preferences, sick calls, self-swaps, switch
+requests, coworker swap invites and responses, vacation/day-off requests,
+password changes, logout cycles) plus manager triage (rebuilds, shift
+add/delete, request approve/deny, unassign/override assign, roster edits,
+hires, schedule-link sends). Barrier-synchronized collision drills force
+specific races (double manager review, sick-vs-swap, shift-delete-vs-swap
+accept, pick storms, roster delete vs. activity, double vacation,
+unassign-vs-accept). A background auditor recomputes invariants from the
+database (capacity, orphaned rows, status validity, invite consistency,
+day-off/vacation honoring, hours caps, days-off rule, rank collisions,
+`PRAGMA integrity_check`) throughout the run.
+
+The gauntlet **reports** issues without fixing them. Artifacts land in
+`tools/liveweek-artifacts/run-<ts>/` (gitignored): `REPORT.md`,
+`summary.json`, `eventlog.jsonl` (every client request),
+`serverlog.jsonl` (server responses + unhandled tracebacks),
+`issues/ISSUE-*.md` (evidence + suspected code locations),
+`snapshots/` (HTML + PNG), and the final `liveweek.db`. Fixing agents should
+read `issues/` top-down and cross-reference the event logs.
+
+```sh
+.venv/bin/python tools/liveweek.py                  # 120s ambient phase
+.venv/bin/python tools/liveweek.py --duration 240   # longer soak
+.venv/bin/python tools/liveweek.py --seed 42        # reproducible roster/RNG
+.venv/bin/python tools/liveweek.py --strict         # CI mode: exit 2 on CRITICAL/HIGH findings
+```
+
+
 ---
 
 ## 5. Development Principles

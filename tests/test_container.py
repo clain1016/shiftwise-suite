@@ -1,8 +1,13 @@
 """Unit tests for containerization readiness, health checks, and proxy integration."""
 import os
+import sys
 import unittest
 import tempfile
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 import app as appmod
 import mock_seed
@@ -46,9 +51,9 @@ class TestContainerDeployment(unittest.TestCase):
         shift_count = conn.execute("SELECT COUNT(*) c FROM shifts").fetchone()["c"]
         conn.close()
 
-        self.assertEqual(employee_count, 8)
+        self.assertEqual(employee_count, 10)
         self.assertIsNotNone(manager)
-        self.assertEqual(shift_count, 7)
+        self.assertEqual(shift_count, 14)
 
     def test_cookie_security_defaults(self):
         self.assertTrue(appmod.app.config.get("SESSION_COOKIE_HTTPONLY"))

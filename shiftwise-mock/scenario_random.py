@@ -1,7 +1,7 @@
 """Randomized house-chaos simulation on the MOCK app (its own scheduler.db).
 
 Every run is different — seeded from system entropy, seed printed so a run
-can be replayed:  /home/cody/scheduler/.venv/bin/python scenario_random.py <seed>
+can be replayed:  .venv/bin/python scenario_random.py <seed>
 
 Phase 1: coin-flip the roster — each of the 10 employees randomly lands in
          front-of-house or back-of-house (kept balanced 5/5) with a random

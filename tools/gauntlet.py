@@ -101,21 +101,12 @@ def run_gauntlet():
     global EMPS
     # ---------- 1. full-week picks, everyone ----------
     EMPS = all_emps()
-    ph(1, "all " + str(len(EMPS)) + " employees rank all 21 shifts (required)")
+    ph(1, "all " + str(len(EMPS)) + " employees rank all 7 days (required)")
     for u in EMPS:
         login(u)
         house = house_of(u)
         order = DAYS[::-1] if u in ("riley", "priya") else DAYS
-        ordered_ids = []
-        for day in order:
-            c = appmod.db()
-            rows = c.execute(
-                "SELECT id FROM shifts WHERE week_start=? AND day=? AND area=? ORDER BY id",
-                (WEEK, day, house),
-            ).fetchall()
-            c.close()
-            ordered_ids.extend(row["id"] for row in rows)
-        form = {f"rank_{sid}": str(i + 1) for i, sid in enumerate(ordered_ids)}
+        form = {f"rank_day_{day}": str(i + 1) for i, day in enumerate(order)}
         r = client.post("/pick", data=form, follow_redirects=True)
         assert b"Preferences saved" in r.data, u
     print("  all saved; schedule:")
@@ -123,11 +114,11 @@ def run_gauntlet():
         print(f"    {d}: {n}/{s}  [{names}]")
 
     # ---------- 2. partial pick rejection ----------
-    ph(2, "partial pick form REJECTED (only 3 shifts ranked)")
+    ph(2, "partial day-rank form REJECTED (only 6 days ranked)")
     login("maria")
-    form = {f"rank_{sid_of(d)}": str(i + 1) for i, d in enumerate(DAYS[:3])}
+    form = {f"rank_day_{day}": str(i + 1) for i, day in enumerate(DAYS[:6])}
     r = client.post("/pick", data=form, follow_redirects=True)
-    print("  flash:", "Rank ALL" if b"Rank ALL" in r.data else "?? — NOT REJECTED")
+    print("  rejected:", b"Rank all seven days" in r.data)
 
     # ---------- 3. sick call, two on same day ----------
     ph(3, "sick calls: maria + taylor both out on Monday")

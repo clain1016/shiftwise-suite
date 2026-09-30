@@ -3,41 +3,42 @@
 <h1 class="page-title">Manager Dashboard</h1>
 <p class="muted" style="margin-bottom:20px">Week of {{ week }} — scheduling is fully automatic; your job is review only. Front of house and back of house run as two separate schedules.</p>
 
-<div class="card" style="margin-bottom:6px">
+<div class="card" style="margin-bottom:16px">
   <h2 style="margin-top:2px">Add shift</h2>
-  <form method="post" action="{{ url_for('add_shift') }}" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+  <form method="post" action="{{ url_for('add_shift') }}" class="form-grid-add">
     <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
     <select name="area">
       <option value="front">Front of house</option>
       <option value="back">Back of house</option>
     </select>
     <select name="day">{% for d in DAYS %}<option>{{ d }}</option>{% endfor %}</select>
-    <input name="start" placeholder="09:00" size="6" required>
-    <input name="end" placeholder="17:00" size="6" required>
-    <input name="slots" type="number" value="1" min="1" max="10" style="width:64px">
-    <input name="note" placeholder="note (optional)" size="18">
+    <input name="start" placeholder="09:00" required aria-label="Start time">
+    <input name="end" placeholder="17:00" required aria-label="End time">
+    <input name="slots" type="number" value="1" min="1" max="10" aria-label="Slots" placeholder="Slots">
+    <input name="note" placeholder="note (optional)" aria-label="Optional note">
     <button class="btn">Add shift</button>
   </form>
-  <p class="muted" style="margin-bottom:0">Posting a shift notifies only that area's employees and re-runs the auto-assigner.</p>
+  <p class="muted" style="margin-bottom:0; margin-top:8px">Posting a shift notifies only that area's employees and re-runs the auto-assigner.</p>
 </div>
 
 <h2>Front of house</h2>
-<table>
-  <tr><th>Day</th><th>Time</th><th>Slots</th><th>Assigned</th><th></th></tr>
+<div class="table-wrap">
+<table class="manager-shifts-table">
+  <tr><th>Day</th><th>Time</th><th>Slots</th><th>Assigned</th><th>Action</th></tr>
   {% for s in front_shifts %}
   <tr>
-    <td><strong>{{ s.day }}</strong>{% if s.note %} <span class="muted">· {{ s.note }}</span>{% endif %}</td>
-    <td>{{ s.start_time }}–{{ s.end_time }}</td>
-    <td>
+    <td data-label="Day"><strong>{{ s.day }}</strong>{% if s.note %} <span class="muted">· {{ s.note }}</span>{% endif %}</td>
+    <td data-label="Time"><span class="tag dim">{{ s.start_time }}–{{ s.end_time }}</span></td>
+    <td data-label="Slots">
       {% set n = assigned[s.id]|length %}
       {% if n < s.slots %}<span class="tag warn">{{ n }}/{{ s.slots }}</span>
       {% else %}<span class="tag ok">{{ n }}/{{ s.slots }}</span>{% endif %}
     </td>
-    <td>
+    <td data-label="Assigned">
       {% for a in assigned[s.id] %}{{ a }}{% if not loop.last %}, {% endif %}{% endfor %}
       {% if not assigned[s.id] %}<span class="tag warn">unstaffed</span>{% endif %}
     </td>
-    <td>
+    <td data-label="Action">
       <form method="post" action="{{ url_for('delete_shift', shift_id=s.id) }}" style="display:inline"
             onsubmit="return confirm('Delete this shift?')">
         <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
@@ -49,24 +50,26 @@
   <tr><td colspan="5" class="muted">No front-of-house shifts posted for this week.</td></tr>
   {% endfor %}
 </table>
+</div>
 
 <h2>Back of house</h2>
-<table>
-  <tr><th>Day</th><th>Time</th><th>Slots</th><th>Assigned</th><th></th></tr>
+<div class="table-wrap">
+<table class="manager-shifts-table">
+  <tr><th>Day</th><th>Time</th><th>Slots</th><th>Assigned</th><th>Action</th></tr>
   {% for s in back_shifts %}
   <tr>
-    <td><strong>{{ s.day }}</strong>{% if s.note %} <span class="muted">· {{ s.note }}</span>{% endif %}</td>
-    <td>{{ s.start_time }}–{{ s.end_time }}</td>
-    <td>
+    <td data-label="Day"><strong>{{ s.day }}</strong>{% if s.note %} <span class="muted">· {{ s.note }}</span>{% endif %}</td>
+    <td data-label="Time"><span class="tag dim">{{ s.start_time }}–{{ s.end_time }}</span></td>
+    <td data-label="Slots">
       {% set n = assigned[s.id]|length %}
       {% if n < s.slots %}<span class="tag warn">{{ n }}/{{ s.slots }}</span>
       {% else %}<span class="tag ok">{{ n }}/{{ s.slots }}</span>{% endif %}
     </td>
-    <td>
+    <td data-label="Assigned">
       {% for a in assigned[s.id] %}{{ a }}{% if not loop.last %}, {% endif %}{% endfor %}
       {% if not assigned[s.id] %}<span class="tag warn">unstaffed</span>{% endif %}
     </td>
-    <td>
+    <td data-label="Action">
       <form method="post" action="{{ url_for('delete_shift', shift_id=s.id) }}" style="display:inline"
             onsubmit="return confirm('Delete this shift?')">
         <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
@@ -78,16 +81,19 @@
   <tr><td colspan="5" class="muted">No back-of-house shifts posted for this week.</td></tr>
   {% endfor %}
 </table>
+</div>
 
 <h2>Employee picks (this week)</h2>
+<div class="table-wrap">
 <table>
   <tr><th>Employee</th><th>Rank</th><th>Shift</th></tr>
   {% for p in picks %}
-  <tr><td>{{ p.name }}</td><td>#{{ p.rank }}</td><td>{{ p.day }} {{ p.start_time }}–{{ p.end_time }}</td></tr>
+  <tr><td data-label="Employee"><strong>{{ p.name }}</strong></td><td data-label="Rank"><span class="tag dim">#{{ p.rank }}</span></td><td data-label="Shift">{{ p.day }} {{ p.start_time }}–{{ p.end_time }}</td></tr>
   {% else %}
   <tr><td colspan="3" class="muted">No picks yet.</td></tr>
   {% endfor %}
 </table>
+</div>
 
 <h2>Employees with no assignment this week</h2>
 <div class="card">

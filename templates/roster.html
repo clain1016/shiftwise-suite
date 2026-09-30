@@ -6,7 +6,7 @@
 
 <div class="card roster-add" style="margin-bottom:18px">
   <h2 style="margin-top:0">Add employee</h2>
-  <form method="post" action="{{ url_for('add_employee') }}" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+  <form method="post" action="{{ url_for('add_employee') }}" class="form-grid-add">
     <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
     <input name="username" placeholder="Username" required>
     <input name="name" placeholder="Name" required>
@@ -21,6 +21,7 @@
 </div>
 
 <form id="roster-save" method="post" action="{{ url_for('roster') }}"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"></form>
+<div class="table-wrap">
 <table class="roster-table">
   <tr><th>Employee</th><th>Email</th><th>Phone</th><th>House</th><th>Employment type</th><th>Hire date</th><th>Weekly hours cap</th><th>Account / schedule link</th></tr>
   {% for e in employees %}
@@ -41,36 +42,38 @@
       </select>
     </td>
     <td data-label="Hire date"><input form="roster-save" type="date" name="hired_{{ e.id }}" value="{{ e.hired_on or '' }}"></td>
-    <td data-label="Weekly hours cap"><input form="roster-save" type="number" name="cap_{{ e.id }}" value="{{ e.weekly_hours or 40 }}" min="1" max="168" style="width:74px"></td>
+    <td data-label="Weekly hours cap"><input form="roster-save" type="number" name="cap_{{ e.id }}" value="{{ e.weekly_hours or 40 }}" min="1" max="168" class="cap-input"></td>
     <td data-label="Account">
       <form method="post" action="{{ url_for('send_employee_schedule_link', user_id=e.id) }}" style="display:flex; gap:6px; margin-bottom:6px">
         <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-        <button class="btn" name="channel" value="email" {% if not e.email %}disabled title="Add an email address first"{% endif %}>Email link</button>
-        <button class="btn" name="channel" value="sms" {% if not e.phone %}disabled title="Add a phone number first"{% endif %}>Text link</button>
+        <button class="btn sm" name="channel" value="email" {% if not e.email %}disabled title="Add an email address first"{% endif %}>Email link</button>
+        <button class="btn sm" name="channel" value="sms" {% if not e.phone %}disabled title="Add a phone number first"{% endif %}>Text link</button>
       </form>
-      <button class="btn" type="button" onclick="document.getElementById('password-dialog-{{ e.id }}').showModal()">Reset password</button>
-      <dialog id="password-dialog-{{ e.id }}" style="background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:12px; max-width:420px; width:calc(100% - 32px)">
+      <button class="btn sm" type="button" onclick="document.getElementById('password-dialog-{{ e.id }}').showModal()">Reset password</button>
+      <dialog id="password-dialog-{{ e.id }}">
         <form method="post" action="{{ url_for('reset_employee_password', user_id=e.id) }}">
           <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-          <h2>Reset password for {{ e.name }}</h2>
-          <input name="password" type="password" minlength="12" autocomplete="new-password" placeholder="New password (12+ characters)" required aria-label="New password for {{ e.name }}">
-          <input name="confirm_password" type="password" minlength="12" autocomplete="new-password" placeholder="Confirm new password" required aria-label="Confirm new password for {{ e.name }}">
-          <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:14px">
-            <button class="btn ghost" type="button" onclick="this.closest('dialog').close()">Cancel</button>
-            <button class="btn">Save password</button>
+          <h2 style="margin-top:0">Reset password for {{ e.name }}</h2>
+          <p class="muted" style="margin-top:-6px; margin-bottom:14px">Set a temporary password (12+ characters) for this employee.</p>
+          <input name="password" type="password" minlength="12" autocomplete="new-password" placeholder="New password (12+ characters)" required aria-label="New password for {{ e.name }}" style="width:100%; margin-bottom:10px">
+          <input name="confirm_password" type="password" minlength="12" autocomplete="new-password" placeholder="Confirm new password" required aria-label="Confirm new password for {{ e.name }}" style="width:100%; margin-bottom:14px">
+          <div style="display:flex; gap:8px; justify-content:flex-end">
+            <button class="btn sm ghost" type="button" onclick="this.closest('dialog').close()">Cancel</button>
+            <button class="btn sm">Save password</button>
           </div>
         </form>
       </dialog>
       <form method="post" action="{{ url_for('delete_employee', user_id=e.id) }}" onsubmit="return confirm('Permanently delete {{ e.name }} and their schedule history?')">
         <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <input type="hidden" name="confirm" value="yes">
-        <button class="btn" style="background:#a33">Delete employee</button>
+        <button class="btn sm" style="background:#a33; color:#fff">Delete employee</button>
       </form>
     </td>
   </tr>
   {% endfor %}
 </table>
-<p><button class="btn" type="submit" form="roster-save">Save roster</button>
-<span class="muted">Saving re-runs the auto-assigner with the new lineup.</span></p>
+</div>
+<p style="margin-top:14px"><button class="btn" type="submit" form="roster-save">Save roster</button>
+<span class="muted" style="margin-left:8px">Saving re-runs the auto-assigner with the new lineup.</span></p>
 <p class="muted">Passwords are stored as hashes and cannot be viewed. Set a new temporary password here if an employee needs a reset, then share it with them securely.</p>
 {% endblock %}

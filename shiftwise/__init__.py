@@ -1,11 +1,11 @@
 """ShiftWise scheduling application package."""
 from pathlib import Path
 
-from flask import Flask, session
+from flask import Flask
 
 from shiftwise.auth import login_required
 from shiftwise.config import Config
-from shiftwise.db import DB_PATH, SCHEMA, db, init_db, monday_of
+from shiftwise.db import DB_PATH, SCHEMA, init_db, monday_of
 from shiftwise.domain.constants import DAYS, MIN_DAYS_OFF
 from shiftwise.domain.rules import (
     assignment_block_reason,
@@ -18,7 +18,6 @@ from shiftwise.routes import register_blueprints
 from shiftwise.scheduler.coverage import apply_sick, coverage_plan
 from shiftwise.security import init_app as init_csrf
 from shiftwise.scheduler.engine import run_scheduler
-from shiftwise.presentation import format_clock
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
@@ -49,22 +48,6 @@ def create_app(config_class=Config):
 
     init_csrf(flask_app)
     register_blueprints(flask_app)
-
-    flask_app.jinja_env.filters["clock_time"] = format_clock
-
-    @flask_app.context_processor
-    def inject_time_format():
-        time_format = "24h"
-        if session.get("uid"):
-            conn = db()
-            user = conn.execute(
-                "SELECT time_format FROM users WHERE id=?", (session["uid"],)
-            ).fetchone()
-            conn.close()
-            if user and user["time_format"] in ("12h", "24h"):
-                time_format = user["time_format"]
-        return {"time_format": time_format}
-
     return flask_app
 
 

@@ -23,8 +23,7 @@ CREATE TABLE IF NOT EXISTS users (
     hired_on TEXT,
     station TEXT NOT NULL DEFAULT 'front',  -- 'front' = front of house, 'back' = back of house
     email TEXT,
-    phone TEXT,
-    time_format TEXT NOT NULL DEFAULT '24h'
+    phone TEXT
 );
 CREATE TABLE IF NOT EXISTS shifts (
     id INTEGER PRIMARY KEY,
@@ -90,9 +89,8 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 
 def db():
     """Create and configure a SQLite connection for the current DB_PATH."""
-    db_path = _current_db_path()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path, timeout=15.0)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout=15000")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -104,17 +102,10 @@ def monday_of(d):
     return d - timedelta(days=d.weekday())
 
 
-def _current_db_path():
-    """Read DB_PATH from the live module, including legacy app.py overrides."""
-    module = sys.modules.get(__name__)
-    return Path(getattr(module, "DB_PATH", DB_PATH))
-
-
 def init_db(seed_demo=False, mock_roster=False):
     """Initialize schema, apply migrations, enforce passwords, and seed data if empty."""
-    db_path = _current_db_path()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path, timeout=15.0)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
     conn.execute("PRAGMA busy_timeout=15000")
     conn.executescript(SCHEMA)
 
@@ -132,9 +123,6 @@ def init_db(seed_demo=False, mock_roster=False):
         conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
     if "phone" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN phone TEXT")
-    if "time_format" not in cols:
-        conn.execute(
-            "ALTER TABLE users ADD COLUMN time_format TEXT NOT NULL DEFAULT '24h'")
     scols = [r[1] for r in conn.execute("PRAGMA table_info(shifts)")]
     if "area" not in scols:
         conn.execute(

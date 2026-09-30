@@ -22,7 +22,7 @@
 {% for c in conflicts %}
 <div class="card" style="margin-bottom:14px">
   <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px">
-    <strong style="font-size:16px">{{ c.shift.day }} {{ c.shift.start_time|clock_time(time_format) }}–{{ c.shift.end_time|clock_time(time_format) }}</strong>
+    <strong style="font-size:16px">{{ c.shift.day }} {{ c.shift.start_time }}–{{ c.shift.end_time }}</strong>
     <span class="tag {{ 'warn' if c.open_slots > 0 else 'ok' }}">{{ c.assigned|length }}/{{ c.shift.slots }} assigned · {{ c.open_slots }} open</span>
   </div>
   {% if c.shift.note %}<div class="muted" style="margin-top:4px">· {{ c.shift.note }}</div>{% endif %}

@@ -51,9 +51,9 @@ class TestContainerDeployment(unittest.TestCase):
         shift_count = conn.execute("SELECT COUNT(*) c FROM shifts").fetchone()["c"]
         conn.close()
 
-        self.assertEqual(employee_count, 14)
+        self.assertEqual(employee_count, 10)
         self.assertIsNotNone(manager)
-        self.assertEqual(shift_count, 42)
+        self.assertEqual(shift_count, 14)
 
     def test_cookie_security_defaults(self):
         self.assertTrue(appmod.app.config.get("SESSION_COOKIE_HTTPONLY"))

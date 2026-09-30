@@ -51,8 +51,6 @@ def calendar_days(conn, week, user_id, area=None):
         by_day[s["day"]].append({
             "id": s["id"],
             "time": f"{s['start_time']}–{s['end_time']}",
-            "start_time": s["start_time"],
-            "end_time": s["end_time"],
             "note": s["note"],
             "status": status,
             "mine": status is not None,

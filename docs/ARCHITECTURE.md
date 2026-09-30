@@ -120,3 +120,14 @@ Employees submit 5 types of requests through the web interface:
 | `sick` | Specific shift | Calls `apply_sick()`; finds auto-cover | Informational | `approved` / row marked `sick` |
 | `swap` | Specific shift | Calls `coverage_plan()`; releases requester if covered | Informational | `approved_ok` (covered) or `pending` |
 | `switch` | Shift A $\rightarrow$ Shift B | Requires manager approval; validates target capacity | Approve / Deny | `approved` / `denied` |
+
+---
+
+## 6. Planned Extensions
+
+The modular architecture is the foundation for these planned capabilities (no implementation yet):
+
+1. **Employee-to-Employee Shift Trade Board:** Employees post open shifts to a peer board; qualified same-house colleagues accept directly, with manager one-click approval.
+2. **Pluggable Notification Adapters:** Abstract `notify()` into backends (in-app SQLite, email via SMTP, SMS via Twilio).
+3. **iCalendar / Webcal Schedule Feeds:** Signed subscriber URLs (`/schedule/<token>.ics`) so staff can sync published shifts to Google/Apple/Outlook calendars.
+4. **Multi-Week Scheduling & Templates:** Manager-saved repeating shift templates with schedules published 2–4 weeks ahead.

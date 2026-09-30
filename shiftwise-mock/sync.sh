@@ -16,8 +16,8 @@ if [[ ! -x "$python_bin" ]]; then
 fi
 
 if [[ "${1:-}" == "--reseed" ]]; then
-    rm -f scheduler.db scheduler.db-wal scheduler.db-shm
-    SHIFTWISE_DB_PATH="$PWD/scheduler.db" "$python_bin" - <<'PY'
+    rm -f mock.db mock.db-wal mock.db-shm
+    SHIFTWISE_DB_PATH="$PWD/mock.db" "$python_bin" - <<'PY'
 import sys
 from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent

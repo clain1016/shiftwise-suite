@@ -18,7 +18,7 @@ if len(sys.argv) > 1 and sys.argv[1].endswith(".db"):
 else:
     db_target = Path(os.environ.get("SHIFTWISE_SCENARIO_DB_PATH",
                      os.environ.get("SHIFTWISE_DB_PATH",
-                     ROOT_DIR / "shiftwise-mock" / "mock.db")))
+                     ROOT_DIR / "tools" / "gauntlet.db")))
 
 appmod.DB_PATH = db_target
 appmod.init_db(seed_demo=True)

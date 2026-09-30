@@ -14,7 +14,7 @@
 
 ## 3. Workspace Hygiene & Artifact Management
 - **No Stale Test Artifacts:**
-  - Tests and simulation harnesses may generate SQLite databases (`app.db`, `test_*.db`, `shiftwise-mock/scheduler.db`) and cache directories (`__pycache__`, `.pytest_cache`).
+  - Tests and simulation harnesses may generate SQLite databases (`app.db`, `test_*.db`, `shiftwise-mock/mock.db`, `tools/*.db`) and cache directories (`__pycache__`, `.pytest_cache`).
   - Always clean up temporary databases and caches before committing, creating PRs, or proceeding to deployment.
   - `git status` must be completely clean (`nothing to commit, working tree clean`) with no untracked artifacts.
 
@@ -22,5 +22,5 @@
 - Before marking any phase complete, opening a PR, or deploying:
   - Run the full verification suite: `./tools/run_all.sh`
 -  Ensure the full collected pytest unit & integration suite passes (currently 56 tests, 100% green).
-  - Ensure the 10-phase multi-week scheduling simulation completes without error.
+  - Ensure the 11-phase stress gauntlet and scenario simulations complete without error.
   - Validate Docker Compose configuration with `docker compose config`.

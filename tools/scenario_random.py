@@ -1,4 +1,4 @@
-"""Randomized house-chaos simulation on the MOCK app (its own scheduler.db).
+"""Randomized house-chaos simulation on the real app (own scenario DB).
 
 Every run is different — seeded from system entropy, seed printed so a run
 can be replayed:  .venv/bin/python tools/scenario_random.py <seed>
@@ -19,7 +19,7 @@ Final:   audit — understaffed slots, over-cap employees, cross-house leaks
          (stale sick/swap rows after a flip are labeled, anything else is a
          LEAK), and whether the planted cross-house pick ever assigned.
 
-The mock DB is left in the final state — click through on port 5001.
+The scenario DB is left in its final state for inspection.
 """
 import random
 import os
@@ -38,7 +38,7 @@ from shiftwise.security import use_csrf_aware_test_client
 # SHIFTWISE_SCENARIO_DB_PATH points at it explicitly.
 appmod.DB_PATH = Path(os.environ.get("SHIFTWISE_SCENARIO_DB_PATH",
                      os.environ.get("SHIFTWISE_DB_PATH",
-                     ROOT_DIR / "shiftwise-mock" / "mock.db")))
+                     ROOT_DIR / "tools" / "scenario_random.db")))
 
 seed = int(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1].isdigit() else \
     random.SystemRandom().randrange(2 ** 32)

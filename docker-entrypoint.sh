@@ -14,7 +14,7 @@ if [[ -z "${SHIFTWISE_SECRET_KEY:-}" || "${SHIFTWISE_SECRET_KEY}" == "replace_wi
 fi
 
 # Run database schema initialization and migrations prior to starting workers.
-# Demo seeding (8-employee mock roster) is strictly opt-in: set
+# Demo seeding (10-employee mock roster) is strictly opt-in: set
 # SHIFTWISE_DEMO_SEED=1 for a demo; production boots with an empty database
 # and requires SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD on first start.
 if [[ "${SHIFTWISE_DEMO_SEED:-0}" == "1" || "${SHIFTWISE_DEMO_SEED:-0}" == "8" || "${SHIFTWISE_DEMO_SEED:-0}" == "mock" ]]; then

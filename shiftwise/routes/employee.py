@@ -64,12 +64,14 @@ def dashboard():
         "SELECT s.id, s.day, s.start_time, s.end_time, a.user_id, u.name "
         "FROM shifts s JOIN assignments a ON a.shift_id=s.id "
         "JOIN users u ON u.id=a.user_id WHERE s.week_start=? AND s.area=? "
-        "AND a.status NOT IN ('sick','swap_requested') AND u.role='employee' "
+        "AND a.status NOT IN ('sick','swap_requested','manager_fixed','swap_invited') "
+        "AND u.role='employee' "
         "AND u.id!=? ORDER BY u.name, s.id",
         (week, my["station"], session["uid"])).fetchall()
     my_swappable_shifts = [
         shift for shift in shifts
-        if my_assignments.get(shift["id"]) not in (None, "sick", "swap_requested")
+        if my_assignments.get(shift["id"]) not in (None, "sick", "swap_requested",
+                                                   "manager_fixed", "swap_invited")
     ]
     conn.execute("UPDATE notifications SET read=1 WHERE user_id=?", (session["uid"],))
     conn.commit()
@@ -363,12 +365,14 @@ def request_employee_swap():
     uid = session["uid"]
     source = conn.execute(
         "SELECT s.* FROM shifts s JOIN assignments a ON a.shift_id=s.id "
-        "WHERE s.id=? AND a.user_id=? AND a.status NOT IN ('sick','swap_requested')",
+        "WHERE s.id=? AND a.user_id=? AND a.status NOT IN "
+        "('sick','swap_requested','manager_fixed','swap_invited')",
         (source_id, uid),
     ).fetchone()
     target = conn.execute(
         "SELECT s.* FROM shifts s JOIN assignments a ON a.shift_id=s.id "
-        "WHERE s.id=? AND a.user_id=? AND a.status NOT IN ('sick','swap_requested')",
+        "WHERE s.id=? AND a.user_id=? AND a.status NOT IN "
+        "('sick','swap_requested','manager_fixed','swap_invited')",
         (target_id, target_uid),
     ).fetchone()
     requester = conn.execute(
@@ -410,6 +414,12 @@ def request_employee_swap():
            f"{session['name']} asked to exchange {source['day']} "
            f"{source['start_time']}-{source['end_time']} for your {target['day']} "
            f"{target['start_time']}-{target['end_time']} shift.")
+    # The holder keeps the shift (staffed, counts toward hours) while the
+    # coworker invite is pending; accept flips both rows to 'switch_fixed'.
+    conn.execute(
+        "UPDATE assignments SET status='swap_invited' WHERE shift_id=? AND user_id=?",
+        (source_id, uid),
+    )
     conn.commit()
     conn.close()
     flash(f"Swap request sent to {employee['name']}.")
@@ -477,14 +487,21 @@ def respond_to_swap(req_id):
     recipient = conn.execute(
         "SELECT id, name, role, station FROM users WHERE id=?", (session["uid"],)
     ).fetchone()
-    swap_assignments = conn.execute(
-        "SELECT shift_id, user_id, status FROM assignments WHERE (shift_id=? AND user_id=?) "
-        "OR (shift_id=? AND user_id=?)",
-        (req["shift_id"], req["user_id"], req["target_shift_id"], session["uid"]),
-    ).fetchall()
-    assignments_valid = (len(swap_assignments) == 2 and all(
-        row["status"] not in ("sick", "swap_requested") for row in swap_assignments
-    ))
+    source_row = conn.execute(
+        "SELECT status FROM assignments WHERE shift_id=? AND user_id=?",
+        (req["shift_id"], req["user_id"]),
+    ).fetchone()
+    target_row = conn.execute(
+        "SELECT status FROM assignments WHERE shift_id=? AND user_id=?",
+        (req["target_shift_id"], session["uid"]),
+    ).fetchone()
+    # Requester's source row must still carry the pending invite, and the
+    # invited employee's target row must be a live, non-manager-held assignment.
+    assignments_valid = (
+        source_row is not None and source_row["status"] == "swap_invited" and
+        target_row is not None and
+        target_row["status"] not in ("sick", "swap_requested", "swap_invited",
+                                     "manager_fixed"))
     conflicting_assignment = conn.execute(
         "SELECT 1 FROM assignments WHERE (shift_id=? AND user_id=?) "
         "OR (shift_id=? AND user_id=?) LIMIT 1",
@@ -525,6 +542,10 @@ def respond_to_swap(req_id):
     elif decision == "accept":
         reason = "One of the shifts is no longer assigned as requested or the pair is no longer valid."
 
+    conn.execute(
+        "UPDATE assignments SET status='confirmed' WHERE shift_id=? AND user_id=? "
+        "AND status='swap_invited'", (req["shift_id"], req["user_id"]),
+    )
     conn.execute("UPDATE requests SET status='denied', reason=? WHERE id=?",
                  (reason, req_id))
     notify(conn, req["user_id"], "conflict",

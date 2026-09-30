@@ -95,6 +95,7 @@ Connects an employee to a shift slot and tracks its scheduling state.
 - `'manager_fixed'`: Placed via manual manager override; permanently preserved across rebuilds.
 - `'sick'`: Vacated due to sick call; row retained for tracking, slot opened for coverage.
 - `'swap_requested'`: Employee requested coverage; slot available for coverage assignment.
+- `'swap_invited'`: An employee→coworker swap invitation is pending on this shift; the holder keeps the shift (still counts as staffed and toward hours) until the invited coworker accepts.
 
 ---
 

@@ -33,8 +33,8 @@
       <div class="cal-time">{{ s.time }}</div>
       {% if s.note %}<div class="muted">{{ s.note }}</div>{% endif %}
       {% if s.mine %}
-        <span class="tag {{ 'warn' if s.status in ('swap_requested', 'sick') else 'ok' }}">
-          {{ {'swap_requested': 'swap requested', 'sick': 'out sick'}.get(s.status, 'scheduled') }}</span>
+        <span class="tag {{ 'warn' if s.status in ('swap_requested', 'sick', 'swap_invited') else 'ok' }}">
+          {{ {'swap_requested': 'swap requested', 'sick': 'out sick', 'swap_invited': 'swap invite'}.get(s.status, 'scheduled') }}</span>
       {% endif %}
       {% if session.role == 'manager' and s.who %}
         <div class="cal-who">{{ s.who }}</div>

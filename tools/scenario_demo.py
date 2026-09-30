@@ -47,7 +47,8 @@ for suffix in ("", "-wal", "-shm"):
 
 appmod.init_db(seed_demo=True)
 conn = sqlite3.connect(appmod.DB_PATH)
-for t in ("users", "shifts", "picks", "assignments", "notifications", "requests", "login_attempts"):
+for t in ("users", "shifts", "picks", "coverage_preferences", "assignments",
+          "notifications", "requests", "login_attempts"):
     conn.execute(f"DELETE FROM {t}")
 conn.commit()
 conn.close()

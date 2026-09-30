@@ -77,9 +77,12 @@ def run_scheduler(week_start, actor="system"):
                 "AND status NOT IN ('sick','swap_requested')", shift_ids):
             previous[r["user_id"]].add(r["shift_id"])
             previous_staffed[r["shift_id"]] += 1
+        # 'swap_invited' rows are exempt too: the pending swap keeps the
+        # holder on the shift, so the requester's own swap must not evict them.
         for r in conn.execute(
                 f"SELECT shift_id, user_id FROM assignments WHERE shift_id IN ({ph}) "
-                "AND status NOT IN ('sick','swap_requested')", shift_ids).fetchall():
+                "AND status NOT IN ('sick','swap_requested','swap_invited')",
+                shift_ids).fetchall():
             if r["user_id"] in unavailable[r["shift_id"]]:
                 conn.execute("DELETE FROM assignments WHERE shift_id=? AND user_id=?",
                              (r["shift_id"], r["user_id"]))
@@ -96,9 +99,11 @@ def run_scheduler(week_start, actor="system"):
         # with them before re-running the lineup. ('notified' rows are NOT
         # fixed — they're regular auto-assignments and must be recomputed so
         # a higher-priority pick can displace an earlier lower-priority one.)
+        # 'swap_invited' stays fixed: a pending coworker swap keeps the holder
+        # on the shift (staffed, counted toward hours) until the invite resolves.
         fixed = conn.execute(
             f"SELECT shift_id, user_id FROM assignments WHERE shift_id IN ({ph}) "
-            "AND status IN ('confirmed', 'manager_fixed')",
+            "AND status IN ('confirmed', 'manager_fixed', 'swap_invited')",
             shift_ids).fetchall()
         # Manager-approved switches and arranged cover stay fixed on rebuild.
         fixed += conn.execute(

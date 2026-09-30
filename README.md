@@ -56,21 +56,22 @@ Comprehensive documentation is available in the [`docs/`](docs/) directory:
 
 ---
 
-## Running Tests
+## Running Tests & Simulation Harnesses
 
 All test suites use isolated temporary SQLite databases:
 
 ```sh
-# Run unittest suites
-.venv/bin/pytest -v test_container.py test_review_fixes.py shiftwise-mock/test_lan_bind.py
-
-# Run full procedural test suite
-for test in test_*.py; do
-    .venv/bin/python "$test"
-done
+# Run entire test suite with pytest
+.venv/bin/pytest tests/
 
 # Run the 11-phase stress gauntlet
-.venv/bin/python shiftwise-mock/gauntlet.py
+.venv/bin/python tools/gauntlet.py
+
+# Run the sequential conflict scenario simulation
+.venv/bin/python tools/scenario_demo.py
+
+# Run all tests and simulations in one command
+./tools/run_all.sh
 ```
 
 ---

@@ -47,32 +47,23 @@ export SHIFTWISE_DEMO_SEED=1
 
 Tests use isolated temporary SQLite databases and never alter working or production databases.
 
-### Running All Tests via Script
-```sh
-for test in test_*.py; do
-    echo "Running $test..."
-    .venv/bin/python "$test"
-done
-```
-
 ### Running with Pytest
 ```sh
-.venv/bin/pytest -v test_container.py test_review_fixes.py shiftwise-mock/test_lan_bind.py
+.venv/bin/pytest tests/
 ```
 
-### Running Mock Twin Tests
+### Running All Verifications via Runner
 ```sh
-.venv/bin/python shiftwise-mock/test_mock.py
-.venv/bin/python shiftwise-mock/test_lan_bind.py
+./tools/run_all.sh
 ```
 
 ---
 
 ## 4. End-to-End Simulation Harnesses
 
-The repository includes three advanced simulation and chaos-testing scripts:
+The repository includes three advanced simulation and chaos-testing scripts in `tools/`:
 
-### 1. Gauntlet (`shiftwise-mock/gauntlet.py`)
+### 1. Gauntlet (`tools/gauntlet.py`)
 An 11-phase deterministic stress test verifying:
 - Full 10-person preference submissions
 - Partial pick form rejection
@@ -83,16 +74,16 @@ An 11-phase deterministic stress test verifying:
 - Mid-week roster additions and re-ranking
 
 ```sh
-.venv/bin/python shiftwise-mock/gauntlet.py
+.venv/bin/python tools/gauntlet.py
 ```
 
-### 2. Scenario Demo (`shiftwise-mock/scenario_demo.py`)
+### 2. Scenario Demo (`tools/scenario_demo.py`)
 A 10-phase sequential simulation illustrating conflict handling step-by-step:
 ```sh
-.venv/bin/python shiftwise-mock/scenario_demo.py
+.venv/bin/python tools/scenario_demo.py
 ```
 
-### 3. House Chaos Simulation (`shiftwise-mock/scenario_random.py`)
+### 3. House Chaos Simulation (`tools/scenario_random.py`)
 A randomized property-based chaos harness:
 - Randomly balances roster between FOH and BOH
 - Plants invalid cross-house picks to verify isolation
@@ -101,10 +92,10 @@ A randomized property-based chaos harness:
 
 ```sh
 # Random run
-.venv/bin/python shiftwise-mock/scenario_random.py
+.venv/bin/python tools/scenario_random.py
 
 # Replay a specific seed
-.venv/bin/python shiftwise-mock/scenario_random.py <seed>
+.venv/bin/python tools/scenario_random.py <seed>
 ```
 
 ---

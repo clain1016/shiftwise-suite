@@ -281,16 +281,18 @@ def test_settings_is_last_in_desktop_and_mobile_navigation(isolated_db):
     response = client.get("/settings")
     html = response.data.decode()
     desktop_links = html.split('<div class="links">', 1)[1].split("</div>", 1)[0]
-    mobile_links = html.split('<div class="mobile-menu" id="mobileMenu">', 1)[1].split("</div>", 1)[0]
+    mobile_menu = html.split('<div class="mobile-menu" id="mobileMenu">', 1)[1].split("<script>", 1)[0]
+    last_mobile_link = mobile_menu[mobile_menu.rfind("<a "):].split("</a>", 1)[0]
 
     assert desktop_links.rfind("Settings") > desktop_links.rfind("My requests")
-    assert mobile_links.rstrip().endswith("Settings</a>")
+    assert "Settings" in last_mobile_link
 
     client.get("/logout")
     client.post("/login", data={"username": "manager", "password": "manager"})
     manager_html = client.get("/settings").data.decode()
     manager_desktop = manager_html.split('<div class="links">', 1)[1].split("</div>", 1)[0]
     manager_mobile = manager_html.split(
-        '<div class="mobile-menu" id="mobileMenu">', 1)[1].split("</div>", 1)[0]
+        '<div class="mobile-menu" id="mobileMenu">', 1)[1].split("<script>", 1)[0]
+    manager_last_mobile_link = manager_mobile[manager_mobile.rfind("<a "):].split("</a>", 1)[0]
     assert manager_desktop.rfind("Settings") > manager_desktop.rfind("Roster")
-    assert manager_mobile.rstrip().endswith("Settings</a>")
+    assert "Settings" in manager_last_mobile_link

@@ -16,6 +16,7 @@ from flask import (
 from shiftwise.auth import login_required
 from shiftwise.db import db, monday_of
 from shiftwise.domain.constants import DAYS
+from shiftwise.domain.rules import assignment_block_reason
 from shiftwise.notify import notify
 from shiftwise.scheduler.coverage import apply_sick, coverage_plan
 from shiftwise.scheduler.engine import run_scheduler
@@ -44,6 +45,9 @@ def dashboard():
         my_assignments[r["shift_id"]] = r["status"]
     my_picks = {r["shift_id"]: r["rank"] for r in conn.execute(
         "SELECT shift_id, rank FROM picks WHERE user_id=?", (session["uid"],))}
+    cover_prefs = {r["shift_id"]: r["willing"] for r in conn.execute(
+        "SELECT shift_id, willing FROM coverage_preferences WHERE user_id=?",
+        (session["uid"],))}
     # who is on each shift + remaining capacity (sick rows don't count as staff)
     roster = defaultdict(list)
     for r in conn.execute(
@@ -53,12 +57,29 @@ def dashboard():
     notifs = conn.execute(
         "SELECT * FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 20",
         (session["uid"],)).fetchall()
+    coworkers = conn.execute(
+        "SELECT id, name FROM users WHERE role='employee' AND station=? AND id!=? ORDER BY name",
+        (my["station"], session["uid"])).fetchall()
+    coworker_shifts = conn.execute(
+        "SELECT s.id, s.day, s.start_time, s.end_time, a.user_id, u.name "
+        "FROM shifts s JOIN assignments a ON a.shift_id=s.id "
+        "JOIN users u ON u.id=a.user_id WHERE s.week_start=? AND s.area=? "
+        "AND a.status NOT IN ('sick','swap_requested') AND u.role='employee' "
+        "AND u.id!=? ORDER BY u.name, s.id",
+        (week, my["station"], session["uid"])).fetchall()
+    my_swappable_shifts = [
+        shift for shift in shifts
+        if my_assignments.get(shift["id"]) not in (None, "sick", "swap_requested")
+    ]
     conn.execute("UPDATE notifications SET read=1 WHERE user_id=?", (session["uid"],))
     conn.commit()
     conn.close()
     return render_template("dashboard.html", shifts=shifts, DAYS=DAYS, week=week,
                            my_assignments=my_assignments, my_picks=my_picks,
-                           my_station=my["station"], roster=roster, notifs=notifs)
+                           my_station=my["station"], roster=roster, notifs=notifs,
+                           cover_prefs=cover_prefs, coworkers=coworkers,
+                           coworker_shifts=coworker_shifts,
+                           my_swappable_shifts=my_swappable_shifts)
 
 
 @employee_bp.route("/pick", methods=["POST"])
@@ -94,6 +115,14 @@ def pick():
               "(1 = top choice) so every shift has a backup.")
         return redirect(url_for("dashboard"))
     conn.execute("DELETE FROM picks WHERE user_id=?", (uid,))
+    for sid in week_shifts:
+        willingness = request.form.get(f"cover_{sid}")
+        if willingness in ("yes", "no"):
+            conn.execute(
+                "INSERT INTO coverage_preferences (user_id, shift_id, willing) VALUES (?,?,?) "
+                "ON CONFLICT(user_id, shift_id) DO UPDATE SET willing=excluded.willing",
+                (uid, sid, int(willingness == "yes")),
+            )
     for rank, sid in ranked:
         conn.execute("INSERT OR REPLACE INTO picks (user_id, shift_id, rank) VALUES (?,?,?)",
                      (uid, sid, rank))
@@ -311,3 +340,196 @@ def request_switch(shift_id):
     conn.close()
     flash("Switch request sent — the manager will review it.")
     return redirect(url_for("dashboard"))
+
+
+@employee_bp.route("/request/swap", methods=["POST"])
+@login_required()
+def request_employee_swap():
+    if session["role"] != "employee":
+        abort(403)
+    try:
+        if request.form.get("target_assignment"):
+            target_uid, target_id = map(
+                int, request.form["target_assignment"].split(":", 1))
+        else:
+            target_uid = int(request.form.get("target_user_id", ""))
+            target_id = int(request.form.get("target_shift_id", ""))
+        source_id = int(request.form.get("shift_id", ""))
+    except (TypeError, ValueError):
+        flash("Choose your shift, the employee, and the shift you want to exchange.")
+        return redirect(url_for("dashboard"))
+
+    conn = db()
+    uid = session["uid"]
+    source = conn.execute(
+        "SELECT s.* FROM shifts s JOIN assignments a ON a.shift_id=s.id "
+        "WHERE s.id=? AND a.user_id=? AND a.status NOT IN ('sick','swap_requested')",
+        (source_id, uid),
+    ).fetchone()
+    target = conn.execute(
+        "SELECT s.* FROM shifts s JOIN assignments a ON a.shift_id=s.id "
+        "WHERE s.id=? AND a.user_id=? AND a.status NOT IN ('sick','swap_requested')",
+        (target_id, target_uid),
+    ).fetchone()
+    requester = conn.execute(
+        "SELECT id, station FROM users WHERE id=? AND role='employee'", (uid,)
+    ).fetchone()
+    employee = conn.execute(
+        "SELECT id, name, role, station FROM users WHERE id=?", (target_uid,)
+    ).fetchone()
+    conflicting_assignment = conn.execute(
+        "SELECT 1 FROM assignments WHERE (shift_id=? AND user_id=?) "
+        "OR (shift_id=? AND user_id=?) LIMIT 1",
+        (target_id, uid, source_id, target_uid),
+    ).fetchone()
+    if (not source or not target or not requester or not employee or
+            employee["role"] != "employee" or target_uid == uid or
+            source_id == target_id or source["week_start"] != target["week_start"] or
+            source["area"] != target["area"] or requester["station"] != source["area"] or
+            employee["station"] != source["area"] or conflicting_assignment):
+        conn.close()
+        flash("Choose valid shifts in the same week and house, assigned to you and the requested employee.")
+        return redirect(url_for("dashboard"))
+
+    pending = conn.execute(
+        "SELECT 1 FROM requests WHERE kind='swap' AND user_id=? AND shift_id=? "
+        "AND status='approved'", (uid, source_id),
+    ).fetchone()
+    if pending:
+        conn.close()
+        flash("You already have a pending request for that shift.")
+        return redirect(url_for("dashboard"))
+
+    conn.execute(
+        "INSERT INTO requests (user_id, kind, shift_id, target_shift_id, target_user_id, "
+        "status, created_at) VALUES (?, 'swap', ?, ?, ?, 'approved', ?)",
+        (uid, source_id, target_id, target_uid,
+         datetime.now().isoformat(timespec="seconds")),
+    )
+    notify(conn, target_uid, "swap_request",
+           f"{session['name']} asked to exchange {source['day']} "
+           f"{source['start_time']}-{source['end_time']} for your {target['day']} "
+           f"{target['start_time']}-{target['end_time']} shift.")
+    conn.commit()
+    conn.close()
+    flash(f"Swap request sent to {employee['name']}.")
+    return redirect(url_for("my_requests"))
+
+
+@employee_bp.route("/my-requests")
+@login_required()
+def my_requests():
+    if session["role"] != "employee":
+        return redirect(url_for("requests"))
+    conn = db()
+    rows = conn.execute(
+        "SELECT r.*, requester.name requester_name, target.name target_name "
+        "FROM requests r JOIN users requester ON requester.id=r.user_id "
+        "LEFT JOIN users target ON target.id=r.target_user_id "
+        "WHERE (r.user_id=? OR r.target_user_id=?) AND r.kind!='manager_unassign' "
+        "ORDER BY r.id DESC", (session["uid"], session["uid"]),
+    ).fetchall()
+    items = []
+    for row in rows:
+        item = dict(row)
+        for field, key in (("shift_id", "source_desc"),
+                           ("target_shift_id", "target_desc")):
+            if row[field]:
+                shift = conn.execute(
+                    "SELECT day, start_time, end_time FROM shifts WHERE id=?",
+                    (row[field],),
+                ).fetchone()
+                if shift:
+                    item[key] = f"{shift['day']} {shift['start_time']}-{shift['end_time']}"
+        items.append(item)
+    conn.close()
+    return render_template("my_requests.html", items=items)
+
+
+@employee_bp.route("/request/<int:req_id>/respond", methods=["POST"])
+@login_required()
+def respond_to_swap(req_id):
+    if session["role"] != "employee":
+        abort(403)
+    decision = request.form.get("decision")
+    reason = request.form.get("reason", "").strip()
+    if decision not in ("accept", "reject") or (decision == "reject" and not reason):
+        flash("Choose accept or reject; include a reason when rejecting.")
+        return redirect(url_for("my_requests"))
+    if len(reason) > 500:
+        flash("Keep the response reason to 500 characters or fewer.")
+        return redirect(url_for("my_requests"))
+
+    conn = db()
+    conn.execute("BEGIN IMMEDIATE")
+    req = conn.execute(
+        "SELECT * FROM requests WHERE id=? AND kind='swap' AND target_user_id=? "
+        "AND status='approved'", (req_id, session["uid"]),
+    ).fetchone()
+    if not req:
+        conn.close()
+        abort(404)
+    source = conn.execute("SELECT * FROM shifts WHERE id=?", (req["shift_id"],)).fetchone()
+    target = conn.execute("SELECT * FROM shifts WHERE id=?", (req["target_shift_id"],)).fetchone()
+    requester = conn.execute(
+        "SELECT id, name, role, station FROM users WHERE id=?", (req["user_id"],)
+    ).fetchone()
+    recipient = conn.execute(
+        "SELECT id, name, role, station FROM users WHERE id=?", (session["uid"],)
+    ).fetchone()
+    swap_assignments = conn.execute(
+        "SELECT shift_id, user_id, status FROM assignments WHERE (shift_id=? AND user_id=?) "
+        "OR (shift_id=? AND user_id=?)",
+        (req["shift_id"], req["user_id"], req["target_shift_id"], session["uid"]),
+    ).fetchall()
+    assignments_valid = (len(swap_assignments) == 2 and all(
+        row["status"] not in ("sick", "swap_requested") for row in swap_assignments
+    ))
+    conflicting_assignment = conn.execute(
+        "SELECT 1 FROM assignments WHERE (shift_id=? AND user_id=?) "
+        "OR (shift_id=? AND user_id=?) LIMIT 1",
+        (req["target_shift_id"], req["user_id"], req["shift_id"], session["uid"]),
+    ).fetchone()
+    assignments_valid = assignments_valid and not conflicting_assignment
+    valid_pair = (source and target and requester and recipient and
+                  requester["role"] == recipient["role"] == "employee" and
+                  source["week_start"] == target["week_start"] and
+                  source["area"] == target["area"] == requester["station"] == recipient["station"])
+    if decision == "accept" and valid_pair and assignments_valid:
+        requester_block = assignment_block_reason(
+            conn, req["user_id"], target, exclude_shift_id=source["id"])
+        recipient_block = assignment_block_reason(
+            conn, session["uid"], source, exclude_shift_id=target["id"])
+        if requester_block or recipient_block:
+            reason = "Swap would violate a weekly hours, days-off, or availability rule."
+        else:
+            conn.execute(
+                "UPDATE assignments SET user_id=?, status='switch_fixed' "
+                "WHERE shift_id=? AND user_id=?",
+                (req["user_id"], target["id"], session["uid"]),
+            )
+            conn.execute(
+                "UPDATE assignments SET user_id=?, status='switch_fixed' "
+                "WHERE shift_id=? AND user_id=?",
+                (session["uid"], source["id"], req["user_id"]),
+            )
+            reason = f"Accepted by {recipient['name']}."
+            conn.execute("UPDATE requests SET status='approved_ok', reason=? WHERE id=?",
+                         (reason, req_id))
+            notify(conn, req["user_id"], "assignment",
+                   f"Your shift swap with {recipient['name']} was accepted.")
+            conn.commit()
+            conn.close()
+            flash("Swap accepted; both schedules have been updated.")
+            return redirect(url_for("my_requests"))
+    elif decision == "accept":
+        reason = "One of the shifts is no longer assigned as requested or the pair is no longer valid."
+
+    conn.execute("UPDATE requests SET status='denied', reason=? WHERE id=?",
+                 (reason, req_id))
+    notify(conn, req["user_id"], "conflict",
+           f"Your shift swap request was declined: {reason}")
+    conn.commit()
+    conn.close()
+    flash("Swap declined and the requester was notified.")
+    return redirect(url_for("my_requests"))

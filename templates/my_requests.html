@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="page-title">My requests</h1>
+<p class="muted" style="margin-bottom:18px">Track requests you made and respond to shift exchanges sent to you.</p>
+<div class="table-wrap">
+<table class="requests-table">
+  <tr><th>Type</th><th>Shift</th><th>Other employee</th><th>Status</th><th>Reason / response</th><th>Action</th></tr>
+  {% for r in items %}
+  <tr>
+    <td>{{ {'day_off': 'Day off', 'vacation': 'Vacation', 'sick': 'Sick call', 'swap': 'Swap', 'switch': 'Switch'}.get(r.kind, r.kind) }}</td>
+    <td>
+      {% if r.source_desc %}{{ r.source_desc }}{% endif %}
+      {% if r.target_desc %}<br>↔ {{ r.target_desc }}{% endif %}
+      {% if r.kind == 'day_off' %}{{ r.day }}{% endif %}
+      {% if r.kind == 'vacation' %}{{ r.vacation_start }} → {{ r.vacation_end }}{% endif %}
+    </td>
+    <td>
+      {% if r.target_user_id == session.uid %}From {{ r.requester_name }}
+      {% elif r.target_name %}To {{ r.target_name }}
+      {% else %}—{% endif %}
+    </td>
+    <td><span class="tag {{ 'ok' if r.status == 'approved_ok' else ('warn' if r.status == 'approved' else 'dim') }}">
+      {{ {'approved': 'pending', 'approved_ok': 'accepted', 'denied': 'declined'}.get(r.status, r.status) }}
+    </span></td>
+    <td>{{ r.reason or '—' }}</td>
+    <td>
+      {% if r.kind == 'swap' and r.target_user_id == session.uid and r.status == 'approved' %}
+      <form method="post" action="{{ url_for('respond_to_swap', req_id=r.id) }}" style="display:flex; gap:6px; flex-wrap:wrap">
+        <button class="btn sm" name="decision" value="accept">Accept</button>
+        <input name="reason" maxlength="500" placeholder="Reason to decline" aria-label="Reason to decline swap">
+        <button class="btn sm ghost" name="decision" value="reject" formnovalidate>Decline</button>
+      </form>
+      {% endif %}
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6" class="muted">No requests yet.</td></tr>
+  {% endfor %}
+</table>
+</div>
+{% endblock %}

@@ -63,6 +63,19 @@ Records an employee's ranked preference for a specific shift.
 
 ---
 
+### `coverage_preferences`
+Stores the employee's yes/no willingness to cover each shift. Missing rows default to willing.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `user_id` | `INTEGER` | `NOT NULL` | Employee identifier. |
+| `shift_id` | `INTEGER` | `NOT NULL` | Shift identifier. |
+| `willing` | `INTEGER` | `NOT NULL DEFAULT 1` | `1` = willing to cover; `0` = opt out. |
+
+*Constraint:* `PRIMARY KEY(user_id, shift_id)` keeps one coverage preference per employee and shift.
+
+---
+
 ### `assignments`
 Connects an employee to a shift slot and tracks its scheduling state.
 
@@ -96,9 +109,11 @@ Tracks employee absence, vacation, sick, swap, and switch requests.
 | `shift_id` | `INTEGER` | `NULL` | Target shift (sick shift, or shift being surrendered). |
 | `day` | `TEXT` | `NULL` | Weekday for `day_off` request. |
 | `target_shift_id` | `INTEGER` | `NULL` | Desired shift for `switch` request. |
+| `target_user_id` | `INTEGER` | `NULL` | Coworker invited to a direct employee-to-employee swap. |
 | `vacation_start` | `TEXT` | `NULL` | ISO date start of vacation (inclusive). |
 | `vacation_end` | `TEXT` | `NULL` | ISO date end of vacation (inclusive). |
 | `week_start` | `TEXT` | `NULL` | ISO date of week for `day_off` request. |
+| `reason` | `TEXT` | `NULL` | Decision or rejection explanation shown in request history. |
 | `status` | `TEXT` | `NOT NULL DEFAULT 'approved'` | Request status: `pending`, `approved`, `approved_ok`, `denied`. |
 | `created_at` | `TEXT` | `NOT NULL` | ISO timestamp of request submission. |
 

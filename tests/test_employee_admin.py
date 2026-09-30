@@ -40,7 +40,8 @@ class EmployeeAdminTests(unittest.TestCase):
         self.login("manager")
         response = self.client.post(
             f"/manager/roster/{self.employee_id()}/password",
-            data={"password": "fresh-private-passphrase"}, follow_redirects=True)
+            data={"password": "fresh-private-passphrase",
+                  "confirm_password": "fresh-private-passphrase"}, follow_redirects=True)
         self.assertIn(b"password reset", response.data.lower())
         self.assertNotIn(b"fresh-private-passphrase", response.data)
         conn = appmod.db()
@@ -63,6 +64,28 @@ class EmployeeAdminTests(unittest.TestCase):
         self.assertIn(b"Log out", self.client.post("/login", data={
             "username": "alex", "password": "alex"}, follow_redirects=True).data)
 
+    def test_password_reset_rejects_mismatched_confirmation(self):
+        self.login("manager")
+        response = self.client.post(
+            f"/manager/roster/{self.employee_id()}/password",
+            data={"password": "fresh-private-passphrase",
+                  "confirm_password": "different-private-passphrase"},
+            follow_redirects=True)
+        self.assertIn(b"passwords do not match", response.data.lower())
+        conn = appmod.db()
+        stored = conn.execute(
+            "SELECT password FROM users WHERE username='alex'"
+        ).fetchone()[0]
+        conn.close()
+        self.assertTrue(appmod.check_password_hash(stored, "alex"))
+
+    def test_roster_password_reset_requires_confirmation_in_a_dialog(self):
+        self.login("manager")
+        response = self.client.get("/manager/roster")
+        self.assertIn(b"showModal()", response.data)
+        self.assertIn(b"confirm_password", response.data)
+        self.assertNotIn(b"New password (12+)", response.data)
+
     def test_employee_cannot_reset_another_employees_password(self):
         self.login("alex")
         response = self.client.post(
@@ -81,6 +104,10 @@ class EmployeeAdminTests(unittest.TestCase):
                      "VALUES (?,?, 'manager_fixed')", (shift_id, uid))
         conn.execute("INSERT INTO requests (user_id, kind, status, created_at) "
                      "VALUES (?, 'day_off', 'approved', '2026-01-01T00:00:00')", (uid,))
+        conn.execute(
+            "INSERT INTO requests (user_id, kind, shift_id, target_user_id, status, created_at) "
+            "VALUES (?, 'swap', ?, ?, 'approved', '2026-01-01T00:00:00')",
+            (self.employee_id("sam"), shift_id, uid))
         conn.execute("INSERT INTO notifications (user_id, kind, message, created_at) "
                      "VALUES (?, 'assignment', 'test', '2026-01-01T00:00:00')", (uid,))
         conn.commit()
@@ -95,10 +122,17 @@ class EmployeeAdminTests(unittest.TestCase):
         self.assertIn(b"Employee deleted", response.data)
         self.assertIn(b"Log in", employee_client.get("/", follow_redirects=True).data)
         conn = appmod.db()
+        sam_id = self.employee_id("sam")
         for table in ("users", "picks", "assignments", "requests", "notifications"):
             self.assertFalse(conn.execute(
                 f"SELECT 1 FROM {table} WHERE "
                 f"{'id' if table == 'users' else 'user_id'}=?", (uid,)).fetchone(), table)
+        self.assertFalse(conn.execute(
+            "SELECT 1 FROM requests WHERE target_user_id=?", (uid,)).fetchone())
+        cancellation = conn.execute(
+            "SELECT message FROM notifications WHERE user_id=? AND kind='conflict' "
+            "ORDER BY id DESC LIMIT 1", (sam_id,)).fetchone()
+        self.assertIn("invited employee was removed", cancellation["message"])
         conn.close()
 
     def test_employee_cannot_delete_account_from_manager_roster(self):

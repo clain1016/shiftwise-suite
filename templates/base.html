@@ -305,6 +305,7 @@
     </a>
     <div class="links">
       <a href="{{ url_for('calendar_view') }}">Calendar</a>
+      {% if session.role == 'employee' %}<a href="{{ url_for('my_requests') }}">My requests</a>{% endif %}
       {% if session.role == 'manager' %}<a href="{{ url_for('manager') }}">Manager</a>
       <a href="{{ url_for('conflicts') }}">Conflicts</a>
       <a href="{{ url_for('requests') }}">Requests</a>
@@ -312,6 +313,7 @@
     </div>
     <div class="mobile-menu" id="mobileMenu">
       <a href="{{ url_for('calendar_view') }}">Calendar</a>
+      {% if session.role == 'employee' %}<a href="{{ url_for('my_requests') }}">My requests</a>{% endif %}
       {% if session.role == 'manager' %}<a href="{{ url_for('manager') }}">Manager</a>
       <a href="{{ url_for('conflicts') }}">Conflicts</a>
       <a href="{{ url_for('requests') }}">Requests</a>

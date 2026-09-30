@@ -58,7 +58,6 @@ Comprehensive documentation is available in the [`docs/`](docs/) directory:
 - 💻 **[Development Guide](docs/DEVELOPMENT.md):** Local setup, running unit/integration tests, and using the gauntlet/chaos simulation harnesses.
 - 🚀 **[Production Deployment](docs/DEPLOYMENT.md):** Multi-container Docker Compose deployment, Caddy TLS setup, and security hardening.
 - ⚙️ **[Environment Variables](docs/ENVIRONMENT.md):** Complete reference of all `SHIFTWISE_*` configuration parameters.
-- 🗺️ **[Master Reorganization Plan](ShiftWise%20Suite%20reorganization%20plan.md):** Strategic roadmap for codebase modernization and refactoring.
 
 ---
 
@@ -75,6 +74,9 @@ All test suites use isolated temporary SQLite databases:
 
 # Run the sequential conflict scenario simulation
 .venv/bin/python tools/scenario_demo.py
+
+# Run the randomized house-chaos simulation
+.venv/bin/python tools/scenario_random.py
 
 # Run all tests and simulations in one command
 ./tools/run_all.sh

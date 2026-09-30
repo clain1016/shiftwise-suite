@@ -41,6 +41,17 @@ export SHIFTWISE_DEMO_SEED=1
 .venv/bin/python app.py
 ```
 
+### Mock / LAN Demo Environment
+`shiftwise-mock/app.py` starts the same application on `0.0.0.0:5001` against an isolated
+`shiftwise-mock/mock.db`, so other devices on your LAN can evaluate it:
+```sh
+.venv/bin/python shiftwise-mock/app.py
+```
+`shiftwise-mock/sync.sh` reseeds that mock database from the canonical `mock_seed.py` roster:
+```sh
+./shiftwise-mock/sync.sh --reseed
+```
+
 ---
 
 ## 3. Running the Test Suite
@@ -107,6 +118,6 @@ A randomized property-based chaos harness:
 2. **Backward-Compatible Schema:**
    Add new columns with default values and update `init_db()` migration blocks.
 3. **Verify Before Submitting:**
-   Always run root tests, mock tests, and the gauntlet before creating PRs.
+   Always run the full verification suite (`./tools/run_all.sh`) before creating PRs.
 4. **Protect State-Changing Forms:**
    Every `POST` form MUST carry `<input type="hidden" name="_csrf" value="{{ csrf_token() }}">` (`shiftwise/security.py` enforces the token on all unsafe methods). JSON/fetch callers send the same token in the `X-CSRF-Token` header.

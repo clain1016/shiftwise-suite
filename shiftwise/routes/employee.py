@@ -172,25 +172,48 @@ def pick():
     week_shifts = [r["id"] for r in conn.execute(
         "SELECT id FROM shifts WHERE week_start=? AND area=?",
         (week, my_station["station"] if my_station else "front"))]
+    day_ranked = []
+    for day in DAYS:
+        value = request.form.get(f"rank_day_{day}")
+        if not value or not value.isdigit() or not 1 <= int(value) <= 7:
+            day_ranked = []
+            break
+        day_ranked.append((int(value), day))
     ranked = []
-    missing = []
-    for sid in week_shifts:
-        r = request.form.get(f"rank_{sid}")
-        if r and r.isdigit() and 1 <= int(r) <= len(week_shifts):
-            ranked.append((int(r), int(sid)))
-        else:
-            missing.append(sid)
-    if missing:
-        conn.close()
-        flash("Rank ALL shifts (1 = top choice) — every shift needs a "
-              "backup so any shift can be covered if plans change.")
-        return redirect(url_for("dashboard"))
-    # ranks must be 1..N with no gaps or duplicates
-    if sorted(int(r) for r, _ in ranked) != list(range(1, len(week_shifts) + 1)):
-        conn.close()
-        flash("Use each rank 1–" + str(len(week_shifts)) + " exactly once "
-              "(1 = top choice) so every shift has a backup.")
-        return redirect(url_for("dashboard"))
+    if day_ranked:
+        if sorted(rank for rank, _ in day_ranked) != list(range(1, 8)):
+            conn.close()
+            flash("Use each day rank 1–7 exactly once.")
+            return redirect(url_for("dashboard"))
+        day_order = [day for _, day in sorted(day_ranked)]
+        shift_rows = conn.execute(
+            "SELECT id, day FROM shifts WHERE week_start=? AND area=? ORDER BY id",
+            (week, my_station["station"] if my_station else "front")).fetchall()
+        per_day = {day: [] for day in DAYS}
+        for shift in shift_rows:
+            per_day[shift["day"]].append(shift["id"])
+        rank = 1
+        for day in day_order:
+            for sid in per_day[day]:
+                ranked.append((rank, sid))
+                rank += 1
+    else:
+        # Keep accepting the legacy per-shift form for existing clients.
+        missing = []
+        for sid in week_shifts:
+            value = request.form.get(f"rank_{sid}")
+            if value and value.isdigit() and 1 <= int(value) <= len(week_shifts):
+                ranked.append((int(value), int(sid)))
+            else:
+                missing.append(sid)
+        if missing:
+            conn.close()
+            flash("Rank all seven days, from 1 (top choice) to 7.")
+            return redirect(url_for("dashboard"))
+        if sorted(rank for rank, _ in ranked) != list(range(1, len(week_shifts) + 1)):
+            conn.close()
+            flash("Use each shift rank exactly once so every shift has a backup.")
+            return redirect(url_for("dashboard"))
     conn.execute("DELETE FROM picks WHERE user_id=?", (uid,))
     for sid in week_shifts:
         cover_values = request.form.getlist(f"cover_{sid}")

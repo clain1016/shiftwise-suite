@@ -185,6 +185,11 @@ def requests():
 @login_required(role="manager")
 def approve_request(req_id):
     conn = db()
+    reason = request.form.get("reason", "").strip()
+    if len(reason) > 500:
+        conn.close()
+        flash("Keep the response note to 500 characters or fewer.")
+        return redirect(url_for("manager.requests"))
     r = conn.execute(
         "SELECT * FROM requests WHERE id=? "
         "AND NOT (kind='swap' AND target_user_id IS NOT NULL)", (req_id,)).fetchone()
@@ -192,6 +197,7 @@ def approve_request(req_id):
         conn.close()
         flash("Request not found or already handled.")
         return redirect(url_for("manager.requests"))
+    conn.execute("UPDATE requests SET reason=? WHERE id=?", (reason or None, req_id))
     if r["kind"] == "day_off":
         conn.execute("UPDATE requests SET status='approved_ok' WHERE id=?", (req_id,))
         notify(conn, r["user_id"], "assignment",
@@ -317,19 +323,19 @@ def deny_request(req_id):
         conn.close()
         flash("Request not found or already handled.")
         return redirect(url_for("requests"))
-    conn.execute("UPDATE requests SET status='denied' WHERE id=?", (req_id,))
+    reason = request.form.get("reason", "").strip()
+    if len(reason) > 500:
+        conn.close()
+        flash("Keep the response reason to 500 characters or fewer.")
+        return redirect(url_for("requests"))
+    reason = reason or "The manager declined this request."
+    conn.execute("UPDATE requests SET status='denied', reason=? WHERE id=?",
+                 (reason, req_id))
     if r["kind"] == "swap":
         conn.execute(
             "UPDATE assignments SET status='confirmed' WHERE shift_id=? "
             "AND user_id=? AND status='swap_requested'",
             (r["shift_id"], r["user_id"]))
-    reason = request.form.get("reason", "").strip() or "The manager declined this request."
-    if len(reason) > 500:
-        conn.rollback()
-        conn.close()
-        flash("Keep the response reason to 500 characters or fewer.")
-        return redirect(url_for("requests"))
-    conn.execute("UPDATE requests SET reason=? WHERE id=?", (reason, req_id))
     notify(conn, r["user_id"], "conflict",
            f"One of your requests was declined: {reason} Check Requests for details.")
     conn.commit()

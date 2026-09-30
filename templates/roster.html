@@ -7,6 +7,7 @@
 <div class="card roster-add" style="margin-bottom:18px">
   <h2 style="margin-top:0">Add employee</h2>
   <form method="post" action="{{ url_for('add_employee') }}" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
     <input name="username" placeholder="Username" required>
     <input name="name" placeholder="Name" required>
     <input name="password" type="password" placeholder="Initial password (12+ characters)" minlength="12" required>
@@ -19,7 +20,7 @@
   </form>
 </div>
 
-<form id="roster-save" method="post" action="{{ url_for('roster') }}"></form>
+<form id="roster-save" method="post" action="{{ url_for('roster') }}"><input type="hidden" name="_csrf" value="{{ csrf_token() }}"></form>
 <table class="roster-table">
   <tr><th>Employee</th><th>Email</th><th>Phone</th><th>House</th><th>Employment type</th><th>Hire date</th><th>Weekly hours cap</th><th>Account / schedule link</th></tr>
   {% for e in employees %}
@@ -43,14 +44,17 @@
     <td data-label="Weekly hours cap"><input form="roster-save" type="number" name="cap_{{ e.id }}" value="{{ e.weekly_hours or 40 }}" min="1" max="168" style="width:74px"></td>
     <td data-label="Account">
       <form method="post" action="{{ url_for('send_employee_schedule_link', user_id=e.id) }}" style="display:flex; gap:6px; margin-bottom:6px">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <button class="btn" name="channel" value="email" {% if not e.email %}disabled title="Add an email address first"{% endif %}>Email link</button>
         <button class="btn" name="channel" value="sms" {% if not e.phone %}disabled title="Add a phone number first"{% endif %}>Text link</button>
       </form>
       <form method="post" action="{{ url_for('reset_employee_password', user_id=e.id) }}" style="display:flex; gap:6px; margin-bottom:6px">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <input name="password" type="password" minlength="12" autocomplete="new-password" placeholder="New password (12+)" required aria-label="New password for {{ e.name }}">
         <button class="btn">Reset password</button>
       </form>
       <form method="post" action="{{ url_for('delete_employee', user_id=e.id) }}" onsubmit="return confirm('Permanently delete {{ e.name }} and their schedule history?')">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <input type="hidden" name="confirm" value="yes">
         <button class="btn" style="background:#a33">Delete employee</button>
       </form>

@@ -29,6 +29,7 @@
   <div style="margin-top:12px; padding:10px 12px; background:var(--bg-soft); border-radius:9px; border:1px solid var(--line)">
     <form method="post" action="{{ url_for('manager_assign', shift_id=c.shift.id, user_id=0) }}"
           id="override-form-{{ c.shift.id }}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
       <strong style="font-size:13px">Manager override:</strong>
       <select name="user_id" onchange="this.form.action = this.form.action.replace(/\/0$/, '/' + this.value)">
         <option value="" disabled selected>pick an employee…</option>
@@ -55,6 +56,7 @@
       <td>
         {% if c.open_slots > 0 %}
         <form method="post" action="{{ url_for('manager_assign', shift_id=c.shift.id, user_id=cl.user_id) }}" style="display:inline">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
           <button class="btn sm">Assign</button>
         </form>
         {% else %}
@@ -74,6 +76,7 @@
       <td>{{ a.name }} <span class="muted">({{ 'scheduled' if a.status == 'notified' else a.status }})</span></td>
       <td>
         <form method="post" action="{{ url_for('unassign', shift_id=c.shift.id, user_id=a.id) }}" style="display:inline">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
           <button class="btn sm ghost">Unassign</button>
         </form>
       </td>

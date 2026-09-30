@@ -136,8 +136,8 @@ class ReviewFixes(unittest.TestCase):
         conn = appmod.db()
         alex_id = conn.execute(
             "SELECT id FROM users WHERE username='alex'").fetchone()[0]
-        conn.execute("UPDATE users SET station='back' WHERE role='employee' AND id!=?",
-                     (alex_id,))
+        conn.execute("UPDATE users SET station='back' WHERE role='employee' "
+                     "AND username NOT IN ('alex', 'sam')")
         conn.execute("UPDATE users SET weekly_hours=40 WHERE id=?", (alex_id,))
         shift_ids = []
         for day in ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat"):
@@ -501,6 +501,72 @@ class ReviewFixes(unittest.TestCase):
         conn.close()
         self.assertIsNone(remaining_shifts)
         self.assertIsNone(remaining_assignments)
+
+
+    def test_over_limit_cover_only_fills_vacation_gaps(self):
+        """Only slots a pending vacation holds open may be filled past the caps."""
+        week = appmod.monday_of(date.today()).isoformat()
+        conn = appmod.db()
+        for table in ("picks", "assignments", "notifications", "requests",
+                      "shifts", "users"):
+            conn.execute(f"DELETE FROM {table}")
+        for username, station, cap in (("alex", "front", 8),
+                                       ("sam", "front", 40),
+                                       ("bob", "back", 8)):
+            conn.execute(
+                "INSERT INTO users (username, password, name, role, weekly_hours,"
+                " employment_type, hired_on, station) VALUES (?,?,?,?,?,?,?,?)",
+                (username, appmod.generate_password_hash(username), username.title(),
+                 "employee", cap, "part_time", "2024-01-01", station))
+        shifts = {}
+        for area, day in (("front", "Mon"), ("front", "Tue"),
+                          ("back", "Tue"), ("back", "Wed")):
+            shifts[(area, day)] = conn.execute(
+                "INSERT INTO shifts (week_start, day, start_time, end_time, slots, area) "
+                "VALUES (?,?,?,?,?,?)",
+                (week, day, "09:00", "17:00", 1, area)).lastrowid
+        uid = {r["username"]: r["id"]
+               for r in conn.execute("SELECT id, username FROM users")}
+        for (area, day), username in ((("front", "Tue"), "alex"),
+                                      (("back", "Tue"), "bob"),
+                                      (("front", "Mon"), "sam")):
+            conn.execute("INSERT INTO assignments (shift_id, user_id, status) "
+                         "VALUES (?,?,'manager_fixed')",
+                         (shifts[(area, day)], uid[username]))
+        conn.execute("INSERT INTO picks (user_id, shift_id, rank) VALUES (?,?,1)",
+                     (uid["alex"], shifts[("front", "Mon")]))
+        conn.execute("INSERT INTO picks (user_id, shift_id, rank) VALUES (?,?,1)",
+                     (uid["bob"], shifts[("back", "Wed")]))
+        # a pending vacation on Monday only — it holds the front Monday slot open
+        conn.execute("INSERT INTO requests (user_id, kind, vacation_start, "
+                     "vacation_end, status, created_at) VALUES (?,?,?,?,?,?)",
+                     (uid["sam"], "vacation", week, week, "approved", week))
+        conn.commit()
+        conn.close()
+
+        def assigned_to(username, area, day):
+            conn = appmod.db()
+            found = conn.execute(
+                "SELECT 1 FROM assignments a JOIN users u ON u.id=a.user_id "
+                "JOIN shifts s ON s.id=a.shift_id WHERE u.username=? AND s.area=? "
+                "AND s.day=? AND s.week_start=? "
+                "AND a.status NOT IN ('sick','swap_requested')",
+                (username, area, day, week)).fetchone() is not None
+            conn.close()
+            return found
+
+        appmod.run_scheduler(week)
+        # the vacation-driven gap may go over alex's 8h cap (16h that week) ...
+        self.assertTrue(assigned_to("alex", "front", "Mon"))
+        # ... but Wednesday's gap is nobody's vacation, so it stays inside the cap
+        self.assertFalse(assigned_to("bob", "back", "Wed"))
+
+        conn = appmod.db()
+        conn.execute("DELETE FROM requests")
+        conn.commit()
+        conn.close()
+        appmod.run_scheduler(week)
+        self.assertFalse(assigned_to("alex", "front", "Mon"))
 
 
 if __name__ == "__main__":

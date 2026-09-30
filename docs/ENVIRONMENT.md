@@ -31,6 +31,16 @@ All ShiftWise configuration is driven through environment variables prefixed wit
 
 ---
 
+## Security & Login Throttling Variables
+
+| Variable | Type | Default Value | Used In | Description & Recommendations |
+|---|---|---|---|---|
+| `SHIFTWISE_LOGIN_MAX_FAILURES` | Integer | `5` | `shiftwise/auth.py` | Consecutive failed sign-ins allowed for one username before that username is locked out. `0` disables the username lockout. |
+| `SHIFTWISE_LOGIN_IP_MAX_FAILURES` | Integer | `25` | `shiftwise/auth.py` | Consecutive failed sign-ins allowed from one client address, which catches username spraying. `0` disables the address lockout. |
+| `SHIFTWISE_LOGIN_LOCKOUT_SECONDS` | Integer | `900` | `shiftwise/auth.py` | How long a locked username or address stays locked. |
+
+---
+
 ## Test & Simulation Variables
 
 | Variable | Type | Default Value | Used In | Description |

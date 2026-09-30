@@ -9,6 +9,11 @@ if str(REPO_ROOT) not in sys.path:
 
 import app as appmod
 from test_support import isolate_database
+from shiftwise.security import use_csrf_aware_test_client
+
+# Test clients attach a valid CSRF token to unsafe requests, so the suite
+# exercises the real check (see tests/test_csrf.py) instead of disabling it.
+use_csrf_aware_test_client(appmod.app)
 
 
 @pytest.fixture

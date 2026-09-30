@@ -88,7 +88,7 @@ A randomized property-based chaos harness:
 - Randomly balances roster between FOH and BOH
 - Plants invalid cross-house picks to verify isolation
 - Injects 10 random lifecycle events (sick, swap, vacation, day off, station flips, cap changes)
-- Audits invariants (no cross-house leaks, no over-cap hours)
+- Audits invariants (no cross-house leaks, no over-cap hours except the documented pending-vacation coverage option)
 
 ```sh
 # Random run
@@ -103,8 +103,10 @@ A randomized property-based chaos harness:
 ## 5. Development Principles
 
 1. **Keep Invariants Intact:**
-   Never bypass house boundaries (`station == area`), weekly hours limits, or the 2-days-off rule.
+   Never bypass house boundaries (`station == area`), weekly hours limits, or the 2-days-off rule. The single exception is documented in `docs/ARCHITECTURE.md` §3: only a slot a *pending vacation* holds open may be backfilled over the limits, so the manager can review that trade-off.
 2. **Backward-Compatible Schema:**
    Add new columns with default values and update `init_db()` migration blocks.
 3. **Verify Before Submitting:**
    Always run root tests, mock tests, and the gauntlet before creating PRs.
+4. **Protect State-Changing Forms:**
+   Every `POST` form MUST carry `<input type="hidden" name="_csrf" value="{{ csrf_token() }}">` (`shiftwise/security.py` enforces the token on all unsafe methods). JSON/fetch callers send the same token in the `X-CSRF-Token` header.

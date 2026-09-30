@@ -21,6 +21,6 @@
 ## 4. Verification Standard
 - Before marking any phase complete, opening a PR, or deploying:
   - Run the full verification suite: `./tools/run_all.sh`
-  - Ensure all 43 pytest unit & integration tests pass (100% green).
+-  Ensure the full collected pytest unit & integration suite passes (currently 56 tests, 100% green).
   - Ensure the 10-phase multi-week scheduling simulation completes without error.
   - Validate Docker Compose configuration with `docker compose config`.

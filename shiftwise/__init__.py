@@ -16,6 +16,7 @@ from shiftwise.domain.rules import (
 from shiftwise.notify import notify
 from shiftwise.routes import register_blueprints
 from shiftwise.scheduler.coverage import apply_sick, coverage_plan
+from shiftwise.security import init_app as init_csrf
 from shiftwise.scheduler.engine import run_scheduler
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -45,6 +46,7 @@ def create_app(config_class=Config):
     if config_class.SESSION_COOKIE_SECURE:
         flask_app.config["SESSION_COOKIE_SECURE"] = True
 
+    init_csrf(flask_app)
     register_blueprints(flask_app)
     return flask_app
 

@@ -20,11 +20,11 @@
 <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
 <div class="table-wrap">
 <table class="shifts-table">
-  <tr><th>Day</th><th>Time</th><th>Staffed</th><th>Status / your pick</th><th>Your rank</th><th>Willing to cover</th></tr>
+  <tr><th>Day</th><th>Time</th><th>Staffed</th><th>Status / your pick</th><th>Your rank</th></tr>
   {% for s in shifts %}
   <tr>
-    <td data-label="Day"><strong>{{ s.day }}</strong>{% if s.note %} <span class="muted">· {{ s.note }}</span>{% endif %}</td>
-    <td data-label="Time"><span class="tag dim">{{ s.start_time }}–{{ s.end_time }}</span></td>
+    <td data-label="Day"><strong>{{ {'Mon':'Monday','Tue':'Tuesday','Wed':'Wednesday','Thu':'Thursday','Fri':'Friday','Sat':'Saturday','Sun':'Sunday'}[s.day] }}</strong>{% if s.note %} <span class="muted">· {{ s.note }}</span>{% endif %}</td>
+    <td data-label="Time"><span class="tag dim">{{ s.start_time|clock_time(time_format) }}–{{ s.end_time|clock_time(time_format) }}</span></td>
     <td data-label="Staffed">
       {% for name in roster[s.id] %}{{ name }}{% if not loop.last %}, {% endif %}{% endfor %}
       {% set n = roster[s.id]|length %}
@@ -59,28 +59,42 @@
     {% endif %}
     <td data-label="Your rank">
       <label class="mobile-only-label muted" style="display:none; font-size:11px; text-transform:uppercase; font-weight:600; margin-bottom:4px">Your rank</label>
-      <select name="rank_{{ s.id }}" required style="width:100%">
+      <select name="rank_{{ s.id }}" aria-label="Rank {{ s.day }} shift at {{ s.start_time|clock_time(time_format) }}" required style="width:100%">
         <option value="" disabled {% if s.id not in my_picks %}selected{% endif %}>pick 1–{{ shifts|length }}</option>
         {% for r in range(1, shifts|length + 1) %}
           <option value="{{ r }}" {% if my_picks.get(s.id) == r %}selected{% endif %}>{{ r }}</option>
         {% endfor %}
       </select>
     </td>
-    <td data-label="Willing to cover">
-      <label class="mobile-only-label muted" style="display:none; font-size:11px; text-transform:uppercase; font-weight:600; margin-bottom:4px">Willing to cover</label>
-      <select name="cover_{{ s.id }}" aria-label="Willing to cover {{ s.day }} {{ s.start_time }}" style="width:100%">
-        <option value="yes" {% if cover_prefs.get(s.id, 1) %}selected{% endif %}>Yes</option>
-        <option value="no" {% if cover_prefs.get(s.id) == 0 %}selected{% endif %}>No</option>
-      </select>
-    </td>
+
   </tr>
   {% endfor %}
 </table>
 </div>
-<div style="margin-top:14px">
-  <button class="btn">Save my picks</button>
-  <p class="muted" style="margin-top:8px">Rank <strong>every shift 1–{{ shifts|length }}</strong> (1 = top choice, no repeats). Lower ranks are backup choices. Choose whether you're willing to cover each shift. Shifts are assigned automatically by seniority and full-time priority.</p>
-</div>
+<p class="muted">Rank <strong>every shift 1–{{ shifts|length }}</strong> (1 = top choice, no repeats). Lower ranks are backup choices.</p>
+<section class="card availability-section" aria-labelledby="availability-title">
+  <h2 id="availability-title" style="margin-top:4px">Availability to cover</h2>
+  <p class="muted">Select the extra shifts you can cover if needed. Unchecked shifts are not offered to you as coverage options.</p>
+  {% for day in DAYS %}
+    {% set day_shifts = shifts|selectattr('day', 'equalto', day)|list %}
+    {% if day_shifts %}
+    <fieldset class="availability-day">
+      <legend>{{ {'Mon':'Monday','Tue':'Tuesday','Wed':'Wednesday','Thu':'Thursday','Fri':'Friday','Sat':'Saturday','Sun':'Sunday'}[day] }}</legend>
+      <div class="availability-options">
+        {% for s in day_shifts %}
+        <label class="availability-option">
+          <input type="hidden" name="cover_{{ s.id }}" value="no">
+          <input type="checkbox" name="cover_{{ s.id }}" value="yes" {% if cover_prefs.get(s.id, 1) %}checked{% endif %}>
+          <span><strong>{{ s.start_time|clock_time(time_format) }}–{{ s.end_time|clock_time(time_format) }}</strong>{% if s.note %}<span class="muted"> · {{ s.note }}</span>{% endif %}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    {% endif %}
+  {% endfor %}
+</section>
+<p><button class="btn">Save my schedule preferences</button>
+<span class="muted">Shifts are assigned automatically by seniority and full-time priority.</span></p>
 </form>
 
 <div class="dashboard-action-cards">
@@ -117,13 +131,13 @@
       <div class="field-row">
       <select name="my_shift" aria-label="My shift to switch">
         {% for s in shifts %}{% if s.id in my_assignments and my_assignments[s.id] not in ('sick','swap_requested','swap_invited') %}
-        <option value="{{ s.id }}">{{ s.day }} {{ s.start_time }}–{{ s.end_time }} (mine)</option>
+        <option value="{{ s.id }}">{{ s.day }} {{ s.start_time|clock_time(time_format) }}–{{ s.end_time|clock_time(time_format) }} (mine)</option>
         {% endif %}{% endfor %}
       </select>
       <span class="muted" style="text-align:center">for</span>
       <select name="target_shift" aria-label="Target shift">
         {% for s in shifts %}{% if s.id not in my_assignments %}
-        <option value="{{ s.id }}">{{ s.day }} {{ s.start_time }}–{{ s.end_time }}</option>
+        <option value="{{ s.id }}">{{ s.day }} {{ s.start_time|clock_time(time_format) }}–{{ s.end_time|clock_time(time_format) }}</option>
         {% endif %}{% endfor %}
       </select>
       <button class="btn sm ghost">Request switch</button>
@@ -142,13 +156,13 @@
         <label class="muted" for="swap-source" style="font-size:12px">Your shift</label>
         <select name="shift_id" id="swap-source" required>
           {% for s in my_swappable_shifts %}
-          <option value="{{ s.id }}">{{ s.day }} {{ s.start_time }}–{{ s.end_time }}</option>
+          <option value="{{ s.id }}">{{ s.day }} {{ s.start_time|clock_time(time_format) }}–{{ s.end_time|clock_time(time_format) }}</option>
           {% endfor %}
         </select>
         <label class="muted" for="swap-target" style="font-size:12px">Coworker’s shift</label>
         <select name="target_assignment" id="swap-target" required>
           {% for s in coworker_shifts %}
-          <option value="{{ s.user_id }}:{{ s.id }}">{{ s.name }} — {{ s.day }} {{ s.start_time }}–{{ s.end_time }}</option>
+          <option value="{{ s.user_id }}:{{ s.id }}">{{ s.name }} — {{ s.day }} {{ s.start_time|clock_time(time_format) }}–{{ s.end_time|clock_time(time_format) }}</option>
           {% endfor %}
         </select>
         <button class="btn sm ghost" style="margin-top:4px">Send swap request</button>

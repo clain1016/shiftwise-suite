@@ -66,6 +66,15 @@ def sid_of(day, area=None):
     c.close()
     return r["id"] if r else None
 
+def shift_ids(area):
+    c = appmod.db()
+    rows = c.execute(
+        "SELECT id FROM shifts WHERE week_start=? AND area=? ORDER BY id",
+        (WEEK, area),
+    ).fetchall()
+    c.close()
+    return [row["id"] for row in rows]
+
 def my(u, status="notified"):
     c = appmod.db()
     r = c.execute("SELECT s.id, s.day, a.status FROM assignments a "
@@ -92,12 +101,21 @@ def run_gauntlet():
     global EMPS
     # ---------- 1. full-week picks, everyone ----------
     EMPS = all_emps()
-    ph(1, "all " + str(len(EMPS)) + " employees rank all 7 days (required)")
+    ph(1, "all " + str(len(EMPS)) + " employees rank all 21 shifts (required)")
     for u in EMPS:
         login(u)
         house = house_of(u)
-        form = {f"rank_{sid_of(d, house)}": str(i + 1) for i, d in enumerate(
-            DAYS[::-1] if u in ("riley", "priya") else DAYS)}
+        order = DAYS[::-1] if u in ("riley", "priya") else DAYS
+        ordered_ids = []
+        for day in order:
+            c = appmod.db()
+            rows = c.execute(
+                "SELECT id FROM shifts WHERE week_start=? AND day=? AND area=? ORDER BY id",
+                (WEEK, day, house),
+            ).fetchall()
+            c.close()
+            ordered_ids.extend(row["id"] for row in rows)
+        form = {f"rank_{sid}": str(i + 1) for i, sid in enumerate(ordered_ids)}
         r = client.post("/pick", data=form, follow_redirects=True)
         assert b"Preferences saved" in r.data, u
     print("  all saved; schedule:")
@@ -105,7 +123,7 @@ def run_gauntlet():
         print(f"    {d}: {n}/{s}  [{names}]")
 
     # ---------- 2. partial pick rejection ----------
-    ph(2, "partial pick form REJECTED (only 3 days ranked)")
+    ph(2, "partial pick form REJECTED (only 3 shifts ranked)")
     login("maria")
     form = {f"rank_{sid_of(d)}": str(i + 1) for i, d in enumerate(DAYS[:3])}
     r = client.post("/pick", data=form, follow_redirects=True)
@@ -201,7 +219,7 @@ def run_gauntlet():
         print(f"  jordan pulled off {tgt['day']}; backfilled by {who['name'] if who else 'NOBODY'}")
 
     # ---------- 10. roster change ----------
-    ph(10, "roster change: add new part-timer (avery), they pick all 7 days")
+    ph(10, "roster change: add new part-timer (avery), they pick all 21 shifts")
     login("manager")
     client.post("/manager/roster/add", data={
         "username": "avery", "password": "avery-private-passphrase", "name": "Avery Quinn",
@@ -212,9 +230,10 @@ def run_gauntlet():
     assert row, "new employee was not added"
     c.close()
     login("avery", "avery-private-passphrase")
-    form = {f"rank_{sid_of(d, house_of('avery'))}": str(i + 1) for i, d in enumerate(DAYS)}
+    avery_ids = shift_ids(house_of("avery"))
+    form = {f"rank_{sid}": str(i + 1) for i, sid in enumerate(avery_ids)}
     r = client.post("/pick", data=form, follow_redirects=True)
-    print("  avery picked all 7 days:", b"Preferences saved" in r.data)
+    print("  avery picked all 21 shifts:", b"Preferences saved" in r.data)
     c = appmod.db()
     avery_holds = c.execute("SELECT COUNT(*) c FROM assignments a JOIN users u ON "
                             "u.id=a.user_id WHERE u.username='avery'").fetchone()["c"]

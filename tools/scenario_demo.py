@@ -1,4 +1,4 @@
-"""Full scenario simulation on the mock roster (10 employees, Mon-Sun).
+"""Full scenario simulation on the mock roster (14 employees, Mon-Sun).
 
 Every employee submits their preferred schedule through the real HTTP
 routes, then conflicts of every kind are injected one at a time so each
@@ -22,6 +22,7 @@ final state so you can click through it on port 5001.
 import sys
 import os
 import sqlite3
+from collections import defaultdict
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -63,10 +64,26 @@ def login(u):
     r = client.post("/login", data={"username": u, "password": u}, follow_redirects=True)
     assert b"Log out" in r.data, f"login failed for {u}"
 
-def full_form(day_to_id, preferred_days):
+def day_shift_ids(area):
+    conn = appmod.db()
+    rows = conn.execute(
+        "SELECT id, day FROM shifts WHERE week_start=? AND area=? ORDER BY id",
+        (week, area),
+    ).fetchall()
+    conn.close()
+    grouped = defaultdict(list)
+    for row in rows:
+        grouped[row["day"]].append(row["id"])
+    return grouped
+
+def full_form(day_to_ids, preferred_days):
     order = list(preferred_days) + [d for d in appmod.DAYS if d not in preferred_days]
-    return {f"rank_{day_to_id[day]}": str(rank)
-            for rank, day in enumerate(order, 1)}
+    form = {}
+    for day_rank, day in enumerate(order):
+        for shift_rank, shift_id in enumerate(day_to_ids[day], 1):
+            rank = day_rank * len(day_to_ids[day]) + shift_rank
+            form[f"rank_{shift_id}"] = str(rank)
+    return form
 
 def snapshot(title):
     conn = appmod.db()
@@ -135,27 +152,16 @@ def run_demo():
     print("=" * 64)
     print("PHASE 1 — every employee submits their preferred schedule")
     print("=" * 64)
-    PREFS = {
-        "maria":  {"Mon": 1, "Tue": 2, "Fri": 3, "Sat": 4},
-        "devon":  {"Fri": 1, "Sat": 2, "Mon": 3},
-        "priya":  {"Fri": 1, "Sat": 2, "Wed": 3, "Sun": 4},
-        "alex":   {"Sat": 1, "Fri": 2, "Tue": 3},
-        "sam":    {"Fri": 1, "Mon": 2, "Sun": 3},
-        "jordan": {"Sat": 1, "Fri": 2, "Thu": 3},
-        "taylor": {"Fri": 1, "Sat": 2, "Wed": 3, "Mon": 4},
-        "riley":  {"Sat": 1, "Sun": 2, "Fri": 3},
-    }
+    PREFS = mock_seed.PREFS
     for user, prefs in PREFS.items():
         login(user)
         client.get("/")
         conn = appmod.db()
         house = conn.execute(
             "SELECT station FROM users WHERE username=?", (user,)).fetchone()["station"]
-        day_to_id = {r["day"]: r["id"] for r in conn.execute(
-            "SELECT id, day FROM shifts WHERE week_start=? AND area=?",
-            (week, house))}
         conn.close()
-        form = full_form(day_to_id, [day for day, _ in sorted(
+        day_to_ids = day_shift_ids(house)
+        form = full_form(day_to_ids, [day for day, _ in sorted(
             prefs.items(), key=lambda item: item[1])])
         response = client.post("/pick", data=form, follow_redirects=True)
         assert b"Preferences saved" in response.data, user
@@ -265,15 +271,15 @@ def run_demo():
 
     # ================================================= PHASE 7: hours cap
     print("=" * 64)
-    print("PHASE 7 — riley (16h cap) greedily ranks five 8h days")
+    print("PHASE 7 — riley gets a temporary 16h cap and ranks five days")
     print("=" * 64)
     login("riley")
     client.get("/")
     conn = appmod.db()
-    day_to_id = {r["day"]: r["id"] for r in conn.execute(
-        "SELECT id, day FROM shifts WHERE week_start=? AND area='back'", (week,))}
+    conn.execute("UPDATE users SET weekly_hours=16 WHERE username='riley'")
+    conn.commit()
     conn.close()
-    form = full_form(day_to_id, ["Mon", "Tue", "Wed", "Fri", "Sat"])
+    form = full_form(day_shift_ids("back"), ["Mon", "Tue", "Wed", "Fri", "Sat"])
     assert b"Preferences saved" in client.post(
         "/pick", data=form, follow_redirects=True).data
     conn = appmod.db()
@@ -292,10 +298,8 @@ def run_demo():
     login("sam")
     client.get("/")
     conn = appmod.db()
-    day_to_id = {r["day"]: r["id"] for r in conn.execute(
-        "SELECT id, day FROM shifts WHERE week_start=? AND area='front'", (week,))}
     conn.close()
-    form = full_form(day_to_id, ["Mon", "Tue", "Wed", "Thu", "Fri", "Sun"])
+    form = full_form(day_shift_ids("front"), ["Mon", "Tue", "Wed", "Thu", "Fri", "Sun"])
     assert b"Preferences saved" in client.post(
         "/pick", data=form, follow_redirects=True).data
     conn = appmod.db()

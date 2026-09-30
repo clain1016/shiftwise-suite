@@ -686,7 +686,7 @@ def b_partial_picks(ctx):
     for s, rk in zip(shifts[:-1], ranks):
         data[f"rank_{s['id']}"] = str(rk)
     r = ctx.sess.post("/pick", data)
-    ok = r.flash and ("Rank ALL shifts" in r.flash or "Use each rank" in r.flash)
+    ok = r.flash and ("Rank all seven days" in r.flash or "Use each rank" in r.flash)
     if not ok:
         ctx.rec.issue("MEDIUM", "behavior_mismatch",
                       f"{ctx.sess.actor}: partial pick submit was NOT rejected "

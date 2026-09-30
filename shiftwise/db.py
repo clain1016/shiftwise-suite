@@ -42,6 +42,12 @@ CREATE TABLE IF NOT EXISTS picks (
     rank INTEGER NOT NULL,
     UNIQUE(user_id, shift_id)
 );
+CREATE TABLE IF NOT EXISTS coverage_preferences (
+    user_id INTEGER NOT NULL,
+    shift_id INTEGER NOT NULL,
+    willing INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY(user_id, shift_id)
+);
 CREATE TABLE IF NOT EXISTS assignments (
     id INTEGER PRIMARY KEY,
     shift_id INTEGER NOT NULL,
@@ -57,8 +63,10 @@ CREATE TABLE IF NOT EXISTS requests (
     day TEXT,                        -- day_off: which weekday
     target_shift_id INTEGER,         -- switch: the desired shift
     vacation_start TEXT,             -- vacation: range start (inclusive)
-    vacation_end TEXT,               -- vacation: range end (inclusive)
-    week_start TEXT,                 -- day_off: the week requested
+    vacation_end TEXT,             -- vacation: range end (inclusive)
+    week_start TEXT,               -- day_off: the week requested
+    target_user_id INTEGER,        -- employee-directed swap: requested coworker
+    reason TEXT,                   -- decision explanation shown to requester
     status TEXT NOT NULL DEFAULT 'approved',
     created_at TEXT NOT NULL
 );
@@ -126,6 +134,10 @@ def init_db(seed_demo=False, mock_roster=False):
         conn.execute("ALTER TABLE requests ADD COLUMN vacation_end TEXT")
     if "week_start" not in rcols:
         conn.execute("ALTER TABLE requests ADD COLUMN week_start TEXT")
+    if "target_user_id" not in rcols:
+        conn.execute("ALTER TABLE requests ADD COLUMN target_user_id INTEGER")
+    if "reason" not in rcols:
+        conn.execute("ALTER TABLE requests ADD COLUMN reason TEXT")
 
     for user in conn.execute("SELECT id, username, password FROM users").fetchall():
         password = user[2]

@@ -9,7 +9,7 @@ The core operational workflow is:
 1. **Manager defines shift slots:** Specifies week start date, weekday, time range, capacity (slots), and house area (`front` or `back`).
 2. **Employees rank preferred shifts:** Staff submit 1-to-N ranked preferences for open shifts within their assigned station.
 3. **Automated Scheduler assigns shifts:** The algorithm allocates shifts by round and priority lineup, honoring weekly hours caps, minimum days off, and house separation rules.
-4. **Self-Service & Coverage:** Staff can file day-off requests, vacation periods, sick calls, and shift swaps. Coverage planning algorithms automatically identify qualified, same-house replacement staff.
+4. **Self-Service & Coverage:** Staff can file day-off requests, vacation periods, sick calls, and shift swaps. They can opt in or out of covering each shift and directly invite a coworker to exchange assigned shifts; the recipient accepts or declines, and accepted exchanges must satisfy schedule constraints. Coverage planning automatically identifies qualified, willing, same-house replacements.
 5. **Manager Overrides:** Managers retain ultimate control, able to manually place staff with sticky assignments (`manager_fixed`) that survive subsequent automated recomputations.
 
 ```

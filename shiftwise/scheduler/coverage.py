@@ -50,6 +50,12 @@ def coverage_plan(conn, week, out_shift_id, out_uid, allow_over_limits=False):
         uid = u["id"]
         if uid in already_on:
             return False
+        preference = conn.execute(
+            "SELECT willing FROM coverage_preferences WHERE user_id=? AND shift_id=?",
+            (uid, out_shift_id),
+        ).fetchone()
+        if preference and not preference["willing"]:
+            return False
         return assignment_block_reason(
             conn, uid, shift, allow_over_limits=allow_over_limits) is None
 

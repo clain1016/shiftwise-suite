@@ -116,6 +116,7 @@ def delete_shift(shift_id):
         "kind IN ('swap','switch','manager_unassign','sick')",
         (shift_id, shift_id))
     conn.execute("DELETE FROM picks WHERE shift_id=?", (shift_id,))
+    conn.execute("DELETE FROM coverage_preferences WHERE shift_id=?", (shift_id,))
     conn.execute("DELETE FROM assignments WHERE shift_id=?", (shift_id,))
     conn.execute("DELETE FROM shifts WHERE id=?", (shift_id,))
     conn.commit()
@@ -139,7 +140,9 @@ def requests():
     conn = db()
     rows = conn.execute(
         "SELECT r.*, u.name FROM requests r JOIN users u ON u.id=r.user_id "
-        "WHERE r.kind!='manager_unassign' ORDER BY r.id DESC").fetchall()
+        "WHERE r.kind!='manager_unassign' AND "
+        "NOT (r.kind='swap' AND r.target_user_id IS NOT NULL) "
+        "ORDER BY r.id DESC").fetchall()
     items = []
     for r in rows:
         item = dict(r)
@@ -315,9 +318,15 @@ def deny_request(req_id):
             "UPDATE assignments SET status='confirmed' WHERE shift_id=? "
             "AND user_id=? AND status='swap_requested'",
             (r["shift_id"], r["user_id"]))
+    reason = request.form.get("reason", "").strip() or "The manager declined this request."
+    if len(reason) > 500:
+        conn.rollback()
+        conn.close()
+        flash("Keep the response reason to 500 characters or fewer.")
+        return redirect(url_for("requests"))
+    conn.execute("UPDATE requests SET reason=? WHERE id=?", (reason, req_id))
     notify(conn, r["user_id"], "conflict",
-           "One of your requests was declined by the manager — check the "
-           "Requests page or talk to them.")
+           f"One of your requests was declined: {reason} Check Requests for details.")
     conn.commit()
     conn.close()
     if r["kind"] == "day_off":

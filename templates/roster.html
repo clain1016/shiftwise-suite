@@ -48,11 +48,19 @@
         <button class="btn" name="channel" value="email" {% if not e.email %}disabled title="Add an email address first"{% endif %}>Email link</button>
         <button class="btn" name="channel" value="sms" {% if not e.phone %}disabled title="Add a phone number first"{% endif %}>Text link</button>
       </form>
-      <form method="post" action="{{ url_for('reset_employee_password', user_id=e.id) }}" style="display:flex; gap:6px; margin-bottom:6px">
-        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
-        <input name="password" type="password" minlength="12" autocomplete="new-password" placeholder="New password (12+)" required aria-label="New password for {{ e.name }}">
-        <button class="btn">Reset password</button>
-      </form>
+      <button class="btn" type="button" onclick="document.getElementById('password-dialog-{{ e.id }}').showModal()">Reset password</button>
+      <dialog id="password-dialog-{{ e.id }}" style="background:var(--card); color:var(--text); border:1px solid var(--line); border-radius:12px; max-width:420px; width:calc(100% - 32px)">
+        <form method="post" action="{{ url_for('reset_employee_password', user_id=e.id) }}">
+          <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+          <h2>Reset password for {{ e.name }}</h2>
+          <input name="password" type="password" minlength="12" autocomplete="new-password" placeholder="New password (12+ characters)" required aria-label="New password for {{ e.name }}">
+          <input name="confirm_password" type="password" minlength="12" autocomplete="new-password" placeholder="Confirm new password" required aria-label="Confirm new password for {{ e.name }}">
+          <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:14px">
+            <button class="btn ghost" type="button" onclick="this.closest('dialog').close()">Cancel</button>
+            <button class="btn">Save password</button>
+          </div>
+        </form>
+      </dialog>
       <form method="post" action="{{ url_for('delete_employee', user_id=e.id) }}" onsubmit="return confirm('Permanently delete {{ e.name }} and their schedule history?')">
         <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <input type="hidden" name="confirm" value="yes">

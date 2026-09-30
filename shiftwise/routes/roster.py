@@ -20,7 +20,7 @@ from werkzeug.security import generate_password_hash
 from shiftwise.auth import login_required
 from shiftwise.db import db, monday_of
 from shiftwise.domain.rules import valid_email, valid_phone
-from shiftwise.notify import send_schedule_link
+from shiftwise.notify import notify, send_schedule_link
 from shiftwise.scheduler.engine import run_scheduler
 
 roster_bp = Blueprint("roster", __name__)
@@ -110,8 +110,12 @@ def send_employee_schedule_link(user_id):
 @login_required(role="manager")
 def reset_employee_password(user_id):
     password = request.form.get("password", "")
+    confirm_password = request.form.get("confirm_password", "")
     if len(password) < 12:
         flash("Use a new password of at least 12 characters.")
+        return redirect(url_for("roster.roster"))
+    if password != confirm_password:
+        flash("The passwords do not match.")
         return redirect(url_for("roster.roster"))
     conn = db()
     employee = conn.execute(
@@ -141,7 +145,14 @@ def delete_employee(user_id):
         abort(404)
     # These tables have no cascading foreign keys; remove the employee's
     # history before removing the account to avoid dangling user references.
-    for table in ("assignments", "picks", "requests", "notifications"):
+    pending_invites = conn.execute(
+        "SELECT user_id FROM requests WHERE target_user_id=? "
+        "AND kind='swap' AND status='approved'", (user_id,)).fetchall()
+    for invite in pending_invites:
+        notify(conn, invite["user_id"], "conflict",
+               "Your shift swap request was cancelled because the invited employee was removed.")
+    conn.execute("DELETE FROM requests WHERE target_user_id=?", (user_id,))
+    for table in ("assignments", "picks", "coverage_preferences", "requests", "notifications"):
         conn.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
     conn.execute("DELETE FROM users WHERE id=? AND role='employee'", (user_id,))
     conn.commit()

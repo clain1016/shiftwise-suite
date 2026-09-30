@@ -20,7 +20,7 @@
 <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
 <div class="table-wrap">
 <table>
-  <tr><th>Day</th><th>Time</th><th>Staffed</th><th>Status / your pick</th><th>Your rank</th></tr>
+  <tr><th>Day</th><th>Time</th><th>Staffed</th><th>Status / your pick</th><th>Your rank</th><th>Willing to cover</th></tr>
   {% for s in shifts %}
   <tr>
     <td><strong>{{ s.day }}</strong>{% if s.note %} <span class="muted">· {{ s.note }}</span>{% endif %}</td>
@@ -58,12 +58,16 @@
         <option value="{{ r }}" {% if my_picks.get(s.id) == r %}selected{% endif %}>{{ r }}</option>
       {% endfor %}
     </select></td>
+    <td><select name="cover_{{ s.id }}" aria-label="Willing to cover {{ s.day }} {{ s.start_time }}">
+      <option value="yes" {% if cover_prefs.get(s.id, 1) %}selected{% endif %}>Yes</option>
+      <option value="no" {% if cover_prefs.get(s.id) == 0 %}selected{% endif %}>No</option>
+    </select></td>
   </tr>
   {% endfor %}
 </table>
 </div>
 <p><button class="btn">Save my picks</button>
-<span class="muted">Rank <strong>every shift 1–{{ shifts|length }}</strong> (1 = top choice, no repeats). Lower ranks are backup choices. Shifts are assigned automatically by seniority and full-time priority.</span>
+<span class="muted">Rank <strong>every shift 1–{{ shifts|length }}</strong> (1 = top choice, no repeats). Lower ranks are backup choices. Choose whether you're willing to cover each shift. Shifts are assigned automatically by seniority and full-time priority.</span>
 </p>
 </form>
 
@@ -112,6 +116,30 @@
     {% else %}
     <p class="muted">No shifts to switch yet.</p>
     {% endif %}
+  </div>
+  <div class="card" style="flex:1; min-width:300px">
+    <h2 style="margin-top:4px">Request an employee swap</h2>
+    {% if coworker_shifts and my_swappable_shifts %}
+    <form method="post" action="{{ url_for('request_employee_swap') }}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap">
+      <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
+      <label class="muted" for="swap-source">Your shift</label>
+      <select name="shift_id" id="swap-source" required>
+        {% for s in my_swappable_shifts %}
+        <option value="{{ s.id }}">{{ s.day }} {{ s.start_time }}–{{ s.end_time }}</option>
+        {% endfor %}
+      </select>
+      <label class="muted" for="swap-target">Coworker’s shift</label>
+      <select name="target_assignment" id="swap-target" required>
+        {% for s in coworker_shifts %}
+        <option value="{{ s.user_id }}:{{ s.id }}">{{ s.name }} — {{ s.day }} {{ s.start_time }}–{{ s.end_time }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn sm ghost">Send swap request</button>
+    </form>
+    {% else %}
+    <p class="muted">A swap is available when you and a coworker are assigned shifts in the same week.</p>
+    {% endif %}
+    <p><a href="{{ url_for('my_requests') }}">View my requests</a></p>
   </div>
 </div>
 {% else %}

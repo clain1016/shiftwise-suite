@@ -26,6 +26,7 @@
     <td>
       {% if r.kind == 'swap' and r.target_user_id == session.uid and r.status == 'approved' %}
       <form method="post" action="{{ url_for('respond_to_swap', req_id=r.id) }}" style="display:flex; gap:6px; flex-wrap:wrap">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <button class="btn sm" name="decision" value="accept">Accept</button>
         <input name="reason" maxlength="500" placeholder="Reason to decline" aria-label="Reason to decline swap">
         <button class="btn sm ghost" name="decision" value="reject" formnovalidate>Decline</button>

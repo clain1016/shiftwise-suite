@@ -25,9 +25,11 @@
     <td>
       {% if r.status == 'approved' %}
       <form method="post" action="{{ url_for('approve_request', req_id=r.id) }}" style="display:inline">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <button class="btn sm">Approve</button>
       </form>
       <form method="post" action="{{ url_for('deny_request', req_id=r.id) }}" style="display:inline">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <input name="reason" maxlength="500" placeholder="Optional reason" aria-label="Reason for denying request">
         <button class="btn sm ghost">Deny</button>
       </form>

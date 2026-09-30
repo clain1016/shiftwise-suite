@@ -6,6 +6,7 @@
 <div class="card" style="margin-bottom:6px">
   <h2 style="margin-top:2px">Add shift</h2>
   <form method="post" action="{{ url_for('add_shift') }}" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+    <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
     <select name="area">
       <option value="front">Front of house</option>
       <option value="back">Back of house</option>
@@ -39,6 +40,7 @@
     <td>
       <form method="post" action="{{ url_for('delete_shift', shift_id=s.id) }}" style="display:inline"
             onsubmit="return confirm('Delete this shift?')">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <button class="btn sm ghost">Delete</button>
       </form>
     </td>
@@ -67,6 +69,7 @@
     <td>
       <form method="post" action="{{ url_for('delete_shift', shift_id=s.id) }}" style="display:inline"
             onsubmit="return confirm('Delete this shift?')">
+        <input type="hidden" name="_csrf" value="{{ csrf_token() }}">
         <button class="btn sm ghost">Delete</button>
       </form>
     </td>

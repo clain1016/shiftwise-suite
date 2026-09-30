@@ -32,6 +32,7 @@ sys.path.insert(0, str(ROOT_DIR))
 
 import app as appmod
 import mock_seed
+from shiftwise.security import use_csrf_aware_test_client
 
 # Isolated database: never touches the working database unless
 # SHIFTWISE_SCENARIO_DB_PATH points at it explicitly.
@@ -55,6 +56,7 @@ n_emp, n_days, n_picks = mock_seed.seed(appmod)
 print(f"mock DB reseeded: {n_emp} employees, {n_days} days/house, "
       f"{n_picks} pre-seeded picks (wiped by phase 2)")
 
+use_csrf_aware_test_client(appmod.app)
 client = appmod.app.test_client()
 WEEK = appmod.monday_of(date.today()).isoformat()
 DAYS = appmod.DAYS

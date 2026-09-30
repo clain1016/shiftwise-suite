@@ -73,8 +73,8 @@ $$\text{priority\_key} = (0 \text{ if front else } 1, \ 0 \text{ if full\_time e
 The helper `assignment_block_reason(conn, uid, shift)` validates four constraints before assigning an employee:
 
 1. **Availability:** Employee must not have an active absence request (`vacation`, `day_off`) or pending `swap` on that shift.
-2. **Weekly Hours Cap:** Total assigned hours plus the new shift's duration must not exceed `users.weekly_hours` (default 40 for full-time).
-3. **Days-Off Rule:** Every employee must receive at least 2 days off per week (`MIN_DAYS_OFF = 2`; max 5 working days). A double shift on the same day counts as 1 working day.
+2. **Weekly Hours Cap:** Total assigned hours plus the new shift's duration must not exceed `users.weekly_hours` (default 40 for full-time). One documented exception: a slot that a *pending vacation* is holding open may be backfilled by an over-cap coverer, so the manager can approve the vacation knowing the cover exists.
+3. **Days-Off Rule:** Every employee must receive at least 2 days off per week (`MIN_DAYS_OFF = 2`; max 5 working days). A double shift on the same day counts as 1 working day. The same pending-vacation exception applies.
 4. **Time Overlap:** An employee cannot hold two shifts that overlap in time on the same day.
 
 ### Round-Based Allocation
@@ -88,7 +88,7 @@ The helper `assignment_block_reason(conn, uid, shift)` validates four constraint
 
 When `run_scheduler` executes:
 - Existing auto-assignments (`proposed`, `notified`) are cleared and re-evaluated against the latest picks.
-- Fixed assignments (`manager_fixed` from manager overrides, `confirmed`) are preserved and count against the employee's hours and days.
+- Fixed assignments (`manager_fixed` from manager overrides, `confirmed`, `switch_fixed` from approved switches, `coverage_fixed` from arranged cover) are preserved and count against the employee's hours and days.
 - Pending `swap_requested` and `sick` assignments leave room open for other staff.
 
 ---
@@ -101,6 +101,12 @@ When an assigned shift is vacated, `coverage_plan(conn, week, out_shift_id, out_
 2. **Least-Loaded Backup:** If no unfilled pickers are eligible, falls back to any eligible employee in the same station, prioritizing whoever has the fewest assigned hours.
 3. **Notification:** The new coverer receives an in-app assignment notification; if no legal coverer exists, the manager is alerted.
 
+Slots that a **pending vacation** is holding open are the only gaps that may be
+backfilled past an employee's hours or days-off limit (`_vacated_by_pending_vacation`
+in `shiftwise/scheduler/engine.py`); gaps from sick calls, unfilled picks, or
+manager unassignments stay inside the caps. That is the coverage the requests
+page flags as "Review proposed coverage".
+
 ---
 
 ## 5. Request Lifecycle & State Machine
@@ -109,8 +115,8 @@ Employees submit 5 types of requests through the web interface:
 
 | Request Kind | Target | Immediate Action | Manager Action | Resulting Status |
 |---|---|---|---|---|
-| `day_off` | Day of week | Drops shifts on that day; rebuilds schedule | Informational | `approved` |
-| `vacation` | Date range | Drops shifts in range; rebuilds schedule | Informational | `approved` |
+| `day_off` | Day of week | Drops shifts on that day; rebuilds schedule | Approve / Deny | `approved_ok` / `denied` |
+| `vacation` | Date range | Drops shifts in range; rebuilds schedule | Approve / Deny (blocked while a shift in range is understaffed) | `approved_ok` / `denied` |
 | `sick` | Specific shift | Calls `apply_sick()`; finds auto-cover | Informational | `approved` / row marked `sick` |
 | `swap` | Specific shift | Calls `coverage_plan()`; releases requester if covered | Informational | `approved_ok` (covered) or `pending` |
 | `switch` | Shift A $\rightarrow$ Shift B | Requires manager approval; validates target capacity | Approve / Deny | `approved` / `denied` |

@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT_DIR))
 
 import app as appmod
 from mock_seed import seed
+from shiftwise.security import use_csrf_aware_test_client
 
 if len(sys.argv) > 1 and sys.argv[1].endswith(".db"):
     db_target = Path(sys.argv[1]).resolve()
@@ -24,6 +25,7 @@ appmod.init_db(seed_demo=True)
 seed(appmod)
 appmod.init_db(seed_demo=True)
 
+use_csrf_aware_test_client(appmod.app)
 client = appmod.app.test_client()
 WEEK = appmod.monday_of(date.today()).isoformat()
 DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]

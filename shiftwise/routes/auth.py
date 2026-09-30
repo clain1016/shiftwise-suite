@@ -1,4 +1,6 @@
 """Authentication routes: login, logout, and password management."""
+import math
+
 from flask import (
     Blueprint,
     flash,
@@ -10,7 +12,14 @@ from flask import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from shiftwise.auth import login_required
+from shiftwise.auth import (
+    clear_login_failures,
+    client_ip,
+    login_required,
+    lockout_remaining,
+    note_login_failure,
+    verify_credentials,
+)
 from shiftwise.db import db
 
 auth_bp = Blueprint("auth", __name__)
@@ -19,14 +28,30 @@ auth_bp = Blueprint("auth", __name__)
 @auth_bp.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        ip = client_ip()
         conn = db()
-        u = conn.execute("SELECT * FROM users WHERE username=?",
-                         (request.form.get("username", ""),)).fetchone()
-        conn.close()
-        if u and check_password_hash(u["password"], request.form.get("password", "")):
-            session.update(uid=u["id"], role=u["role"], name=u["name"])
-            return redirect(url_for("dashboard"))
-        flash("Wrong username or password")
+        try:
+            remaining = lockout_remaining(conn, username, ip)
+            if remaining > 0:
+                flash("Too many failed sign-in attempts — try again in "
+                      f"{math.ceil(remaining / 60)} minute(s).")
+                return render_template("login.html")
+            user = verify_credentials(conn, username, password)
+            if user:
+                clear_login_failures(conn, username, ip)
+                conn.commit()
+                # a fresh session id after sign-in, so a pre-login cookie
+                # cannot be reused
+                session.clear()
+                session.update(uid=user["id"], role=user["role"], name=user["name"])
+                return redirect(url_for("dashboard"))
+            note_login_failure(conn, username, ip)
+            conn.commit()
+            flash("Wrong username or password")
+        finally:
+            conn.close()
     return render_template("login.html")
 
 

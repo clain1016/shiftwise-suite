@@ -5,8 +5,13 @@ re-exports all domain functions, database helpers, and constants so existing
 tests, scripts, and deployment configurations continue to work without modification.
 """
 import os
+import smtplib
 import sys
 import types
+import urllib.error
+import urllib.parse
+import urllib.request
+import urllib
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -36,8 +41,11 @@ from shiftwise.domain.rules import (
     priority_key,
     shift_hours,
     unavailable_uids,
+    valid_email,
+    valid_phone,
 )
-from shiftwise.notify import notify
+from shiftwise.notify import notify, send_schedule_link
+from shiftwise.routes.calendar import calendar_days
 from shiftwise.scheduler.coverage import apply_sick, coverage_plan
 from shiftwise.scheduler.engine import run_scheduler
 from shiftwise import app, create_app
@@ -73,6 +81,7 @@ __all__ = [
     "MIN_DAYS_OFF",
     "login_required",
     "notify",
+    "send_schedule_link",
     "run_scheduler",
     "coverage_plan",
     "apply_sick",
@@ -80,12 +89,16 @@ __all__ = [
     "assignment_block_reason",
     "priority_key",
     "unavailable_uids",
+    "valid_email",
+    "valid_phone",
+    "calendar_days",
     "check_password_hash",
     "generate_password_hash",
     "date",
     "datetime",
     "timedelta",
 ]
+
 
 if __name__ == "__main__":
     init_db(seed_demo=os.environ.get("SHIFTWISE_DEMO_SEED") in ("1", "8", "mock"))

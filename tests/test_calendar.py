@@ -20,6 +20,9 @@ def test_calendar():
         rows = [(WEEK, d, "09:00", "17:00", 2) for d in ("Mon", "Wed", "Fri")]
         conn.executemany(
             "INSERT INTO shifts (week_start, day, start_time, end_time, slots) VALUES (?,?,?,?,?)", rows)
+        conn.execute(
+            "INSERT INTO shifts (week_start, day, start_time, end_time, slots, area) "
+            "VALUES (?,?,?,?,?,?)", (WEEK, "Sun", "10:00", "18:00", 1, "back"))
         conn.commit()
 
         # assign Mon to alex, Wed to sam so the calendar has content
@@ -80,6 +83,28 @@ def test_calendar():
         assert r6.status_code == 200 and "Jordan Diaz" in r6.data.decode()
         assert 'class="cal-shift cal-mine"' not in r6.data.decode()
         print("6. Unassigned employee gets a clean empty calendar: OK")
+
+        # --- 7. employees can switch between FOH and BOH schedule views
+        front_view = client.get("/calendar?week=2026-09-28&area=front")
+        back_view = client.get("/calendar?week=2026-09-28&area=back")
+        assert front_view.status_code == back_view.status_code == 200
+        assert "Back of house schedule" in back_view.data.decode()
+        assert "Front of house schedule" in front_view.data.decode()
+        assert back_view.data.decode().count('class="cal-shift') == 1
+        assert "10:00–18:00" in back_view.data.decode()
+        print("7. Employee can select front or back schedule: OK")
+
+        # --- 8. manager employee picker is limited to the selected house
+        client.post("/logout")
+        client.post("/login", data={"username": "manager", "password": "manager"})
+        front_manager = client.get("/calendar?area=front")
+        back_manager = client.get("/calendar?area=back")
+        front_html, back_html = front_manager.data.decode(), back_manager.data.decode()
+        assert front_manager.status_code == back_manager.status_code == 200
+        assert "Alex Rivera" in front_html and "Jordan Diaz" not in front_html
+        assert "Jordan Diaz" in back_html and "Alex Rivera" not in back_html
+        assert "id=\"3\"" not in back_html, "front employee should not be selected in BOH view"
+        print("8. Manager employee picker only lists employees from selected house: OK")
 
         print("\nALL CALENDAR TESTS PASSED")
     finally:

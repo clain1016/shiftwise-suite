@@ -31,10 +31,15 @@ def healthz():
         return {"status": "error"}, 503
 
 
-def calendar_days(conn, week, user_id):
+def calendar_days(conn, week, user_id, area=None):
     """7-day grid for a week: shifts per day, assignment status + staff for user_id."""
-    shifts = conn.execute(
-        "SELECT * FROM shifts WHERE week_start=? ORDER BY id", (week,)).fetchall()
+    if area in ("front", "back"):
+        shifts = conn.execute(
+            "SELECT * FROM shifts WHERE week_start=? AND area=? ORDER BY id",
+            (week, area)).fetchall()
+    else:
+        shifts = conn.execute(
+            "SELECT * FROM shifts WHERE week_start=? ORDER BY id", (week,)).fetchall()
     by_day = defaultdict(list)
     for s in shifts:
         rows = conn.execute(
@@ -72,24 +77,31 @@ def calendar_view():
         week = monday_of(date.today()).isoformat()
     conn = db()
     uid = session["uid"]
+    current_user = conn.execute(
+        "SELECT station FROM users WHERE id=?", (uid,)).fetchone()
+    area = request.args.get("area")
+    if area not in ("front", "back"):
+        area = current_user["station"] if current_user else "front"
     employees = []
     if session["role"] == "manager":
         employees = conn.execute(
-            "SELECT id, name FROM users WHERE role='employee' ORDER BY name").fetchall()
+            "SELECT id, name FROM users WHERE role='employee' AND station=? ORDER BY name",
+            (area,)).fetchall()
         req = request.args.get("user_id", "")
         if req.isdigit():
             row = conn.execute(
-                "SELECT id FROM users WHERE id=? AND role='employee'", (int(req),)).fetchone()
+                "SELECT id FROM users WHERE id=? AND role='employee' AND station=?",
+                (int(req), area)).fetchone()
             if row:
                 uid = row["id"]
     view_user = conn.execute("SELECT name FROM users WHERE id=?", (uid,)).fetchone()
-    days = calendar_days(conn, week, uid)
+    days = calendar_days(conn, week, uid, area)
     conn.close()
     d = date.fromisoformat(week)
     return render_template(
         "calendar.html", days=days, week=week,
         view_name=view_user["name"] if view_user else session.get("name", ""),
-        employees=employees, view_id=uid,
+        employees=employees, view_id=uid, area=area,
         prev_week=(d - timedelta(days=7)).isoformat(),
         next_week=(d + timedelta(days=7)).isoformat(),
         this_week=monday_of(date.today()).isoformat())

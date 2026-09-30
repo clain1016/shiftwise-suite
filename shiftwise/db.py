@@ -21,7 +21,9 @@ CREATE TABLE IF NOT EXISTS users (
     weekly_hours INTEGER DEFAULT 40,
     employment_type TEXT NOT NULL DEFAULT 'part_time',
     hired_on TEXT,
-    station TEXT NOT NULL DEFAULT 'front'  -- 'front' = front of house, 'back' = back of house
+    station TEXT NOT NULL DEFAULT 'front',  -- 'front' = front of house, 'back' = back of house
+    email TEXT,
+    phone TEXT
 );
 CREATE TABLE IF NOT EXISTS shifts (
     id INTEGER PRIMARY KEY,
@@ -104,6 +106,10 @@ def init_db(seed_demo=False, mock_roster=False):
     if "station" not in cols:
         conn.execute(
             "ALTER TABLE users ADD COLUMN station TEXT NOT NULL DEFAULT 'front'")
+    if "email" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
+    if "phone" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN phone TEXT")
     scols = [r[1] for r in conn.execute("PRAGMA table_info(shifts)")]
     if "area" not in scols:
         conn.execute(

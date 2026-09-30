@@ -9,7 +9,7 @@ from shiftwise.domain.rules import (
 from shiftwise.notify import notify
 
 
-def coverage_plan(conn, week, out_shift_id, out_uid):
+def coverage_plan(conn, week, out_shift_id, out_uid, allow_over_limits=False):
     """Pick the next-in-line coverer for a shift its holder is leaving.
 
     Only considers coverers whose station matches the shift's area
@@ -50,7 +50,8 @@ def coverage_plan(conn, week, out_shift_id, out_uid):
         uid = u["id"]
         if uid in already_on:
             return False
-        return assignment_block_reason(conn, uid, shift) is None
+        return assignment_block_reason(
+            conn, uid, shift, allow_over_limits=allow_over_limits) is None
 
     # 1. people who picked this shift but didn't get it — best in lineup.
     # With out_uid=None (backfill pass) every picker is eligible to be

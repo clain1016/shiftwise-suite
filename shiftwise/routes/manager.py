@@ -1,6 +1,6 @@
 """Manager administration routes: shifts, requests, and scheduling triggers."""
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from flask import (
     Blueprint,
@@ -75,22 +75,33 @@ def add_shift():
         flash("Choose a day, an end time after the start, and 1–10 slots.")
         return redirect(url_for("manager"))
     conn = db()
-    conn.execute(
-        "INSERT INTO shifts (week_start, day, start_time, end_time, slots, note, area) "
-        "VALUES (?,?,?,?,?,?,?)",
-        (monday_of(date.today()).isoformat(), day,
-         start_time.strftime("%H:%M"), end_time.strftime("%H:%M"), slots,
-         request.form.get("note") or None, area))
-    for emp in conn.execute(
-            "SELECT id FROM users WHERE role='employee' AND station=?", (area,)):
-        notify(conn, emp["id"], "new_schedule",
-               f"New {day} shift posted ({start}-{end})"
-               f" for your area — submit your picks!")
+    week = monday_of(date.today()).isoformat()
+    start_text = start_time.strftime("%H:%M")
+    end_text = end_time.strftime("%H:%M")
+    note = request.form.get("note") or None
+    areas = (area, "back" if area == "front" else "front")
+    for shift_area in areas:
+        exists = conn.execute(
+            "SELECT 1 FROM shifts WHERE week_start=? AND day=? AND start_time=? "
+            "AND end_time=? AND area=? LIMIT 1",
+            (week, day, start_text, end_text, shift_area)).fetchone()
+        if exists:
+            continue
+        conn.execute(
+            "INSERT INTO shifts (week_start, day, start_time, end_time, slots, note, area) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (week, day, start_text, end_text, slots, note, shift_area))
+        for emp in conn.execute(
+                "SELECT id FROM users WHERE role='employee' AND station=?",
+                (shift_area,)):
+            notify(conn, emp["id"], "new_schedule",
+                   f"New {day} shift posted ({start}-{end})"
+                   f" for your area — submit your picks!")
     conn.commit()
     conn.close()
-    run_scheduler(monday_of(date.today()).isoformat())
+    run_scheduler(week)
     flash("Shift added and employees notified.")
-    return redirect(url_for("manager"))
+    return redirect(url_for("manager.manager"))
 
 
 @manager_bp.route("/manager/shift/delete/<int:shift_id>", methods=["POST"])
@@ -142,6 +153,25 @@ def requests():
                              (r["target_shift_id"],)).fetchone()
             if s:
                 item["target_desc"] = f"{s['day']} {s['start_time']}-{s['end_time']}"
+        if r["kind"] == "vacation" and r["status"] == "approved":
+            start = date.fromisoformat(r["vacation_start"])
+            end = date.fromisoformat(r["vacation_end"])
+            gaps = []
+            for shift in conn.execute(
+                    "SELECT * FROM shifts WHERE week_start>=? AND week_start<=?",
+                    (monday_of(start).isoformat(), end.isoformat())):
+                shift_date = date.fromisoformat(shift["week_start"]) + timedelta(
+                    days=DAYS.index(shift["day"]))
+                if not start <= shift_date <= end:
+                    continue
+                staffed = conn.execute(
+                    "SELECT COUNT(*) FROM assignments WHERE shift_id=? "
+                    "AND status NOT IN ('sick','swap_requested')",
+                    (shift["id"],)).fetchone()[0]
+                if staffed < shift["slots"]:
+                    gaps.append(f"{shift['day']} {shift['start_time']}-{shift['end_time']} "
+                                f"({shift['slots'] - staffed} open)")
+            item["coverage_gaps"] = gaps
         items.append(item)
     conn.close()
     return render_template("requests.html", items=items)
@@ -155,12 +185,33 @@ def approve_request(req_id):
     if not r or r["status"] != "approved":
         conn.close()
         flash("Request not found or already handled.")
-        return redirect(url_for("requests"))
+        return redirect(url_for("manager.requests"))
     if r["kind"] == "day_off":
         conn.execute("UPDATE requests SET status='approved_ok' WHERE id=?", (req_id,))
         notify(conn, r["user_id"], "assignment",
                f"Your day-off request for {r['day']} was approved.")
     elif r["kind"] == "vacation":
+        start = date.fromisoformat(r["vacation_start"])
+        end = date.fromisoformat(r["vacation_end"])
+        gaps = []
+        for shift in conn.execute(
+                "SELECT * FROM shifts WHERE week_start>=? AND week_start<=?",
+                (monday_of(start).isoformat(), end.isoformat())):
+            shift_date = date.fromisoformat(shift["week_start"]) + timedelta(
+                days=DAYS.index(shift["day"]))
+            if not start <= shift_date <= end:
+                continue
+            staffed = conn.execute(
+                "SELECT COUNT(*) FROM assignments WHERE shift_id=? "
+                "AND status NOT IN ('sick','swap_requested')",
+                (shift["id"],)).fetchone()[0]
+            if staffed < shift["slots"]:
+                gaps.append(f"{shift['day']} {shift['start_time']}-{shift['end_time']}")
+        if gaps:
+            conn.close()
+            flash("Vacation can't be approved until coverage is arranged for: "
+                  + ", ".join(gaps) + ".")
+            return redirect(url_for("manager.requests"))
         conn.execute("UPDATE requests SET status='approved_ok' WHERE id=?", (req_id,))
         notify(conn, r["user_id"], "assignment",
                f"Your vacation request for {r['vacation_start']} to "

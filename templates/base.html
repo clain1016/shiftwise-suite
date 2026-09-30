@@ -60,6 +60,7 @@
   nav a:hover { background: rgba(46,124,246,.15); color: #fff; }
   nav a.active { background: var(--accent); color: #081020; }
   .nav-right { display: flex; align-items: center; gap: 14px; }
+  .mobile-menu { display: none; }
   .nav-user { display: flex; align-items: center; gap: 9px; }
   .avatar {
     width: 32px; height: 32px; border-radius: 50%;
@@ -72,7 +73,7 @@
   .nav-user a { color: var(--dim); font-size: 13px; padding: 4px 8px; }
   .nav-user a:hover { color: #fff; }
   /* ---------- layout ---------- */
-  .container { max-width: 1120px; margin: 28px auto 48px; padding: 0 20px; }
+  .container { width: 100%; max-width: 1600px; margin: 28px auto 48px; padding: 0 24px; }
   .flash {
     background: var(--accent-soft);
     border: 1px solid var(--line);
@@ -106,7 +107,8 @@
   }
   table {
     width: 100%;
-    min-width: 640px;
+    min-width: 0;
+    table-layout: fixed;
     border-collapse: separate;
     border-spacing: 0;
     background: var(--card);
@@ -115,7 +117,7 @@
     overflow: hidden;
     box-shadow: var(--shadow);
   }
-  th, td { padding: 11px 14px; text-align: left; font-size: 14px; border-bottom: 1px solid var(--line); }
+  th, td { padding: 11px 14px; text-align: left; font-size: 14px; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
   th {
     background: var(--bg-soft);
     color: var(--dim);
@@ -183,6 +185,7 @@
   .notif .when { color: var(--dim); font-size: 12px; margin-top: 2px; }
   /* ---------- calendar ---------- */
   .cal-day {
+    min-width: 0;
     background: var(--card);
     border: 1px solid var(--line);
     border-radius: 12px;
@@ -232,6 +235,7 @@
     }
     .mobile-menu a:hover { background: rgba(46,124,246,.15); color: #fff; }
     .container { padding: 0 12px; margin: 20px auto 32px; }
+    table { table-layout: auto; }
     .cal-grid { grid-template-columns: 1fr 1fr 1fr !important; gap: 6px; }
     .cal-day { min-height: 100px; padding: 6px; }
     .cal-head { font-size: 12px; margin-bottom: 4px; }
@@ -240,7 +244,17 @@
   @media (max-width: 480px) {
     .cal-grid { grid-template-columns: 1fr !important; gap: 8px; }
     .cal-day { min-height: 120px; }
-    table { min-width: 640px; }
+    .roster-table { min-width: 0; display: block; border: 0; box-shadow: none; background: transparent; overflow: visible; }
+    .roster-table tr:first-child { display: none; }
+    .roster-table tr { display: block; margin-bottom: 8px; padding: 5px 10px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); }
+    .roster-table td { display: grid; grid-template-columns: minmax(105px, 36%) minmax(0, 1fr); gap: 6px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+    .roster-table td::before { content: attr(data-label); color: var(--dim); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+    .roster-table input, .roster-table select { min-width: 0; padding: 6px 8px; font-size: 13px; }
+    .roster-table td:last-child { display: block; border-bottom: 0; }
+    .roster-table td:last-child::before { display: block; margin-bottom: 5px; }
+    .roster-table td:last-child form { flex-wrap: wrap; }
+    .roster-table td:last-child input { width: 100%; min-width: 0; }
+    .roster-table td:last-child button { width: 100%; }
   }
   /* ---------- login ---------- */
   .login-card {
@@ -257,6 +271,22 @@
   .login-card input { width: 100%; margin-bottom: 12px; }
   .login-card .btn { width: 100%; padding: 11px; font-size: 15px; }
   footer { text-align: center; color: var(--dim); font-size: 12px; margin: 40px 0 18px; }
+  @media (min-width: 769px) {
+    .roster-add { padding: 12px 14px; margin-bottom: 12px !important; }
+    .roster-add h2 { margin-bottom: 8px; }
+    .roster-add input, .roster-add select { padding: 7px 9px; font-size: 13px; }
+    .roster-table th, .roster-table td,
+    .requests-table th, .requests-table td { padding: 7px 9px; }
+    .roster-table th { font-size: 10px; }
+    .roster-table td { font-size: 12px; }
+    .roster-table input, .roster-table select { width: 100%; min-width: 0; padding: 6px 7px; font-size: 12px; }
+    .roster-table td:last-child form { gap: 4px !important; margin-bottom: 4px !important; }
+    .roster-table td:last-child .btn { padding: 6px 8px; font-size: 11px; white-space: nowrap; }
+    .roster-table td:last-child input { flex: 1 1 120px; }
+    .requests-table { table-layout: auto; }
+    .requests-table td:last-child { white-space: nowrap; }
+    .requests-table td:last-child form { margin-right: 4px; }
+  }
 </style>
 </head>
 <body>
@@ -274,7 +304,6 @@
       <span class="name">ShiftWise</span>
     </a>
     <div class="links">
-      <a href="{{ url_for('dashboard') }}">My Schedule</a>
       <a href="{{ url_for('calendar_view') }}">Calendar</a>
       {% if session.role == 'manager' %}<a href="{{ url_for('manager') }}">Manager</a>
       <a href="{{ url_for('conflicts') }}">Conflicts</a>
@@ -282,7 +311,6 @@
       <a href="{{ url_for('roster') }}">Roster</a>{% endif %}
     </div>
     <div class="mobile-menu" id="mobileMenu">
-      <a href="{{ url_for('dashboard') }}">My Schedule</a>
       <a href="{{ url_for('calendar_view') }}">Calendar</a>
       {% if session.role == 'manager' %}<a href="{{ url_for('manager') }}">Manager</a>
       <a href="{{ url_for('conflicts') }}">Conflicts</a>

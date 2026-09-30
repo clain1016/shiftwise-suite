@@ -26,6 +26,12 @@ Open [http://127.0.0.1:5000](http://127.0.0.1:5000) and sign in as `manager`.
 
 ---
 
+## Email and text schedule links
+
+The manager can save employee email addresses and E.164 phone numbers on the Roster page, then send the employee a link to sign in and submit schedule preferences. Set `SHIFTWISE_PUBLIC_URL` to the app's externally reachable HTTPS address. Email uses SMTP (`SHIFTWISE_SMTP_HOST`, `SHIFTWISE_SMTP_FROM`, and optionally `SHIFTWISE_SMTP_PORT`, `SHIFTWISE_SMTP_USER`, `SHIFTWISE_SMTP_PASSWORD`). SMS uses Twilio (`SHIFTWISE_TWILIO_ACCOUNT_SID`, `SHIFTWISE_TWILIO_AUTH_TOKEN`, `SHIFTWISE_TWILIO_FROM`). Configure whichever channel you plan to use in `.env` or the deployment secrets file, then restart the app. The message contains the sign-in link, not a password; employees still sign in with their existing account.
+
+---
+
 ## Quickstart (Container Deployment)
 
 ShiftWise includes production-grade container orchestration with Gunicorn behind a Caddy reverse proxy providing automatic TLS and security headers:

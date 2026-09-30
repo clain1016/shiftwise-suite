@@ -1,5 +1,6 @@
 """Shift scheduling engine and automatic round-based assignment."""
 from collections import defaultdict
+from datetime import date, timedelta
 
 from shiftwise.db import db
 from shiftwise.domain.constants import MIN_DAYS_OFF
@@ -42,6 +43,11 @@ def run_scheduler(week_start, actor="system"):
         shift_ids = [s["id"] for s in shifts]
         if not shift_ids:
             return 0
+        week_end = (date.fromisoformat(week_start) + timedelta(days=6)).isoformat()
+        vacation_review = conn.execute(
+            "SELECT 1 FROM requests WHERE kind='vacation' AND status='approved' "
+            "AND vacation_start<=? AND vacation_end>=? LIMIT 1",
+            (week_end, week_start)).fetchone() is not None
         ph = ",".join("?" * len(shift_ids))
         shift_by_id = {s["id"]: s for s in shifts}
         unavailable = {s["id"]: unavailable_uids(conn, s) for s in shifts}
@@ -190,7 +196,9 @@ def run_scheduler(week_start, actor="system"):
                 if open_n <= 0:
                     continue
                 for _ in range(open_n):
-                    cover_uid = coverage_plan(conn, week_start, s["id"], None)
+                    cover_uid = coverage_plan(
+                        conn, week_start, s["id"], None,
+                        allow_over_limits=vacation_review)
                     if cover_uid is None:
                         mgr = conn.execute(
                             "SELECT id FROM users WHERE role='manager'").fetchone()
@@ -222,7 +230,9 @@ def run_scheduler(week_start, actor="system"):
                     notify(conn, cover_uid, "assignment",
                            f"Coverage: you're now on {s['day']} "
                            f"{s['start_time']}-{s['end_time']} (covering an "
-                           "open slot).")
+                           "open slot)." + (" This vacation option may exceed "
+                           "your weekly hours or workday limit; check with your "
+                           "manager before confirming." if vacation_review else ""))
 
         # Once a replacement fills an unresolved swap's slot, clear the
         # original holder and close the request.

@@ -335,7 +335,15 @@ def run_random():
             if len(rows) <= 4:
                 print("  too few shifts left to delete — skipped")
                 continue
-            s = rng.choice(rows)
+            # Keep the required Monday BOH demo shift available after the chaos run.
+            candidates = [r for r in rows if not (
+                r["day"] == "Mon" and r["area"] == "back" and
+                sum(1 for s in rows if s["day"] == "Mon" and s["area"] == "back") <= 1
+            )]
+            if not candidates:
+                print("  only required Monday BOH shift remains — skipped")
+                continue
+            s = rng.choice(candidates)
             login("manager")
             client.post(f"/manager/shift/delete/{s['id']}", follow_redirects=True)
             print(f"  manager deleted the {s['area']} {s['day']} shift "

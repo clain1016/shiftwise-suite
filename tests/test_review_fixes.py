@@ -131,6 +131,45 @@ class ReviewFixes(unittest.TestCase):
                 (alex_id, shift_id)).fetchone())
         conn.close()
 
+    def test_vacation_coverage_can_suggest_extra_day_for_manager_review(self):
+        week = (appmod.date.fromisoformat(self.week) + timedelta(days=7)).isoformat()
+        conn = appmod.db()
+        alex_id = conn.execute(
+            "SELECT id FROM users WHERE username='alex'").fetchone()[0]
+        conn.execute("UPDATE users SET station='back' WHERE role='employee' AND id!=?",
+                     (alex_id,))
+        conn.execute("UPDATE users SET weekly_hours=40 WHERE id=?", (alex_id,))
+        shift_ids = []
+        for day in ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat"):
+            shift_ids.append(conn.execute(
+                "INSERT INTO shifts (week_start, day, start_time, end_time, slots, area) "
+                "VALUES (?,?,?,?,?,?)", (week, day, "09:00", "17:00", 1, "front")
+            ).lastrowid)
+        for shift_id in shift_ids[:5]:
+            conn.execute("INSERT INTO assignments (shift_id, user_id, status) "
+                         "VALUES (?,?,?)", (shift_id, alex_id, "manager_fixed"))
+        conn.execute("INSERT INTO picks (user_id, shift_id, rank) VALUES (?,?,?)",
+                     (alex_id, shift_ids[5], 7))
+        saturday = (date.fromisoformat(week) + timedelta(days=5)).isoformat()
+        conn.execute("INSERT INTO requests (user_id, kind, status, vacation_start, "
+                     "vacation_end, created_at) VALUES (?, 'vacation', 'approved', ?, ?, ?)",
+                     (conn.execute("SELECT id FROM users WHERE username='sam'").fetchone()[0],
+                      saturday, saturday, date.today().isoformat()))
+        conn.commit()
+        self.assertIsNone(appmod.coverage_plan(conn, week, shift_ids[5], None))
+        self.assertEqual(appmod.coverage_plan(
+            conn, week, shift_ids[5], None, allow_over_limits=True), alex_id)
+        conn.close()
+        appmod.run_scheduler(week)
+        conn = appmod.db()
+        self.assertTrue(conn.execute(
+            "SELECT 1 FROM assignments WHERE user_id=? AND shift_id=?",
+            (alex_id, shift_ids[5])).fetchone())
+        conn.close()
+        self.login("manager")
+        review_page = self.client.get("/manager/requests")
+        self.assertIn(b"Review proposed coverage", review_page.data)
+
     def test_denied_vacation_releases_its_exclusion(self):
         next_week = appmod.monday_of(date.today()) + timedelta(days=7)
         conn = appmod.db()
@@ -158,6 +197,70 @@ class ReviewFixes(unittest.TestCase):
             "SELECT 1 FROM assignments WHERE user_id=? AND shift_id=?",
             (alex_id, shift_id)).fetchone())
         conn.close()
+
+    def test_vacation_approval_requires_coverage(self):
+        next_week = appmod.monday_of(date.today()) + timedelta(days=7)
+        conn = appmod.db()
+        shift_id = conn.execute(
+            "INSERT INTO shifts (week_start, day, start_time, end_time, slots) "
+            "VALUES (?,?,?,?,?)", (next_week.isoformat(), "Mon", "09:00", "17:00", 99)
+        ).lastrowid
+        alex_id = conn.execute("SELECT id FROM users WHERE username='alex'").fetchone()[0]
+        conn.execute("INSERT INTO picks (user_id, shift_id, rank) VALUES (?,?,?)",
+                     (alex_id, shift_id, 1))
+        conn.commit()
+        conn.close()
+        self.login("alex")
+        self.client.post("/request/vacation", data={
+            "vac_start": next_week.isoformat(), "vac_end": next_week.isoformat()})
+        conn = appmod.db()
+        request_id = conn.execute("SELECT id FROM requests WHERE kind='vacation'").fetchone()[0]
+        conn.close()
+        self.login("manager")
+        page = self.client.get("/manager/requests")
+        self.assertIn(b"Coverage needed", page.data)
+        response = self.client.post(f"/manager/requests/{request_id}/approve",
+                                    follow_redirects=True)
+        self.assertIn(b"coverage is arranged", response.data)
+        conn = appmod.db()
+        status = conn.execute("SELECT status FROM requests WHERE id=?", (request_id,)).fetchone()[0]
+        conn.close()
+        self.assertEqual(status, "approved")
+
+    def test_vacation_approval_succeeds_after_shift_is_backfilled(self):
+        next_week = appmod.monday_of(date.today()) + timedelta(days=7)
+        conn = appmod.db()
+        shift_id = conn.execute(
+            "INSERT INTO shifts (week_start, day, start_time, end_time, slots, area) "
+            "VALUES (?,?,?,?,?,?)", (next_week.isoformat(), "Mon", "09:00", "17:00", 1, "front")
+        ).lastrowid
+        alex_id = conn.execute("SELECT id FROM users WHERE username='alex'").fetchone()[0]
+        conn.execute("INSERT INTO assignments (shift_id, user_id, status) "
+                     "VALUES (?,?, 'manager_fixed')", (shift_id, alex_id))
+        conn.commit()
+        conn.close()
+        self.login("alex")
+        self.client.post("/request/vacation", data={
+            "vac_start": next_week.isoformat(), "vac_end": next_week.isoformat()})
+        conn = appmod.db()
+        request_id = conn.execute("SELECT id FROM requests WHERE kind='vacation'").fetchone()[0]
+        staffed = conn.execute("SELECT COUNT(*) FROM assignments WHERE shift_id=? "
+                               "AND status NOT IN ('sick','swap_requested')",
+                               (shift_id,)).fetchone()[0]
+        conn.close()
+        self.assertEqual(staffed, 1, "scheduler should backfill the vacationing employee's shift")
+        self.login("manager")
+        response = self.client.post(f"/manager/requests/{request_id}/approve",
+                                    follow_redirects=True)
+        self.assertIn(b"Request approved", response.data)
+        conn = appmod.db()
+        status = conn.execute("SELECT status FROM requests WHERE id=?", (request_id,)).fetchone()[0]
+        notified = conn.execute(
+            "SELECT 1 FROM notifications WHERE user_id=? AND message LIKE '%vacation request%' "
+            "AND message LIKE '%approved%'", (alex_id,)).fetchone()
+        conn.close()
+        self.assertEqual(status, "approved_ok")
+        self.assertIsNotNone(notified)
 
     def test_eighth_shift_accepts_complete_ranking(self):
         self.login("manager")

@@ -492,7 +492,10 @@ def request_employee_swap():
             source["area"] != target["area"] or requester["station"] != source["area"] or
             employee["station"] != source["area"] or conflicting_assignment):
         conn.close()
-        flash("Choose valid shifts in the same week and house, assigned to you and the requested employee.")
+        flash(
+            "Choose valid shifts in the same week and house, assigned to you "
+            "and the requested employee."
+        )
         return redirect(url_for("dashboard"))
 
     pending = conn.execute(
@@ -640,7 +643,10 @@ def respond_to_swap(req_id):
             flash("Swap accepted; both schedules have been updated.")
             return redirect(url_for("my_requests"))
     elif decision == "accept":
-        reason = "One of the shifts is no longer assigned as requested or the pair is no longer valid."
+        reason = (
+            "One of the shifts is no longer assigned as requested or the "
+            "pair is no longer valid."
+        )
 
     conn.execute(
         "UPDATE assignments SET status='confirmed' WHERE shift_id=? AND user_id=? "

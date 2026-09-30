@@ -1,5 +1,5 @@
 from pathlib import Path
-import sys, os
+import sys
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -64,11 +64,7 @@ def test_requests():
 
         # --- 2. day-off request: drops the employee's shifts on that day
         login("sam", "sam")
-        mon_id = sid_for("Mon")
         conn = appmod.db()
-        sam_had_mon = conn.execute(
-            "SELECT 1 FROM assignments WHERE shift_id=? AND user_id=?",
-            (mon_id, uid_for("sam"))).fetchone()
         conn.close()
         r = client.post("/request/day_off", data={"day": "Mon"}, follow_redirects=True)
         assert b"Day off requested" in r.data
@@ -240,7 +236,7 @@ def test_requests():
         r = client.post("/request/vacation",
                         data={"vac_start": vstart, "vac_end": vend}, follow_redirects=True)
         assert b"Vacation requested" in r.data, \
-            f"vacation request should succeed, flash said: " + \
+            "vacation request should succeed, flash said: " + \
             r.data.decode().split('class="flash">')[-1].split("</div>")[0]
         conn = appmod.db()
         jordan_uid = conn.execute("SELECT id FROM users WHERE username='jordan'").fetchone()[0]
@@ -307,8 +303,8 @@ def test_requests():
                 assert mgr_alert, "no coverer -> manager must be alerted"
                 assert b"nobody is available" in r.data
                 jrow_status_uncovered = True
-                print(f"8. Swap requested but uncoverable (everyone at cap) — "
-                      f"manager alerted, jordan relieved either way: OK")
+                print("8. Swap requested but uncoverable (everyone at cap) — "
+                      "manager alerted, jordan relieved either way: OK")
         else:
             print("8. Swap test skipped (jordan holds no swappable shift)")
 

@@ -91,18 +91,28 @@ def send_employee_schedule_link(user_id):
         abort(404)
     destination = employee["email"] if channel == "email" else employee["phone"]
     if not destination:
-        flash(f"Add this employee's {'email address' if channel == 'email' else 'phone number'} first.")
+        flash(
+            f"Add this employee's {'email address' if channel == 'email' else 'phone number'}"
+            " first."
+        )
         return redirect(url_for("roster.roster"))
     try:
         import sys
         appmod = sys.modules.get("app")
-        sender = getattr(appmod, "send_schedule_link", send_schedule_link) if appmod else send_schedule_link
+        sender = (
+            getattr(appmod, "send_schedule_link", send_schedule_link)
+            if appmod
+            else send_schedule_link
+        )
         sender(channel, destination, employee["name"],
                public_url + url_for("auth.login"))
     except (ValueError, OSError, smtplib.SMTPException, urllib.error.URLError) as exc:
         flash(str(exc) or "Message could not be sent. Check the delivery settings.")
     else:
-        flash(f"Schedule link sent by {'email' if channel == 'email' else 'text'} to {employee['name']}.")
+        flash(
+            f"Schedule link sent by {'email' if channel == 'email' else 'text'}"
+            f" to {employee['name']}."
+        )
     return redirect(url_for("roster.roster"))
 
 
@@ -198,7 +208,10 @@ def roster():
                 return redirect(url_for("roster.roster"))
             if not valid_email(email) or not valid_phone(phone):
                 conn.close()
-                flash("Enter a valid email address and phone in international format (+country code).")
+                flash(
+                    "Enter a valid email address and phone in international "
+                    "format (+country code)."
+                )
                 return redirect(url_for("roster.roster"))
             updates.append((et, hired or None, hours_cap, station,
                             email or None, phone or None, uid))

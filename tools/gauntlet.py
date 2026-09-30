@@ -104,7 +104,6 @@ def run_gauntlet():
     ph(1, "all " + str(len(EMPS)) + " employees rank all 7 days (required)")
     for u in EMPS:
         login(u)
-        house = house_of(u)
         order = DAYS[::-1] if u in ("riley", "priya") else DAYS
         form = {f"rank_day_{day}": str(i + 1) for i, day in enumerate(order)}
         r = client.post("/pick", data=form, follow_redirects=True)

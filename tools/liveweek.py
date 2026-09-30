@@ -473,7 +473,6 @@ def run_audit(world: World, rec: Recorder, phase: str, final: bool = False):
                              f"{len(fk)} violations"))
         users = {r["id"]: r for r in con.execute("SELECT * FROM users")}
         shifts = {r["id"]: r for r in con.execute("SELECT * FROM shifts")}
-        requests = {r["id"]: r for r in con.execute("SELECT * FROM requests")}
 
         # over-capacity
         staffed = defaultdict(int)
@@ -949,7 +948,7 @@ def m_view_pages(ctx):
     ctx.sess.get("/manager")
     ctx.sess.get("/manager/requests")
     ctx.sess.get(f"/manager/conflicts?week={ctx.week}")
-    ctx.sess.get(f"/manager/conflicts?week=not-a-date")  # must not 500
+    ctx.sess.get("/manager/conflicts?week=not-a-date")  # must not 500
     ctx.sess.get("/manager/roster")
 
 
@@ -1298,8 +1297,6 @@ def drill_sick_vs_swap(ctx):
                       {"shift": a["shift_id"], "actor": sess.actor},
                       actor=sess.actor, phase=ctx.phase, drill="sick_vs_swap",
                       fingerprint_extra="sick_vs_swap_dup")
-    row = ctx.world.one("SELECT status FROM assignments WHERE shift_id=? AND "
-                        "user_id=?", (a["shift_id"], sess.uid))
     ok500 = all(r.status < 500 for r in out.values() if r)
     if not ok500:
         ctx.rec.issue("CRITICAL", "http_500",

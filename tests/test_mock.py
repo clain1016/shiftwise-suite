@@ -72,6 +72,7 @@ def test_mock_smoke():
     assert not cross, f"cross-house leak: {[r['username'] for r in cross]}"
     assert on_front == ["maria"], f"FOH Mon opening got {on_front}"
     assert on_back == ["morgan"], f"BOH Mon opening got {on_back}"
+    _test_db.cleanup()
 
 
 def test_seeded_demo_has_staggered_shifts_and_peak_staffing():

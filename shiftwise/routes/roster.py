@@ -18,7 +18,7 @@ from flask import (
 from werkzeug.security import generate_password_hash
 
 from shiftwise.auth import login_required
-from shiftwise.db import db, monday_of
+from shiftwise.db import database_engine, db, monday_of
 from shiftwise.domain.rules import valid_email, valid_phone
 from shiftwise.notify import notify, send_schedule_link
 from shiftwise.scheduler.engine import run_scheduler
@@ -153,17 +153,25 @@ def delete_employee(user_id):
     if not employee:
         conn.close()
         abort(404)
-    # These tables have no cascading foreign keys; remove the employee's
-    # history before removing the account to avoid dangling user references.
+    # These tables have no cascading foreign keys on SQLite; remove the
+    # employee's history before removing the account to avoid dangling user
+    # references. On PostgreSQL the ON DELETE CASCADE constraints in
+    # POSTGRES_SCHEMA handle this atomically (Phase 2), so the manual
+    # deletes are skipped there.
     pending_invites = conn.execute(
         "SELECT user_id FROM requests WHERE target_user_id=? "
         "AND kind='swap' AND status='approved'", (user_id,)).fetchall()
     for invite in pending_invites:
         notify(conn, invite["user_id"], "conflict",
                "Your shift swap request was cancelled because the invited employee was removed.")
+    if database_engine() == "sqlite":
+        for table in ("assignments", "picks", "coverage_preferences", "requests", "notifications"):
+            conn.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+    # Swap invites naming the removed employee as invitee are cancelled
+    # explicitly on both engines: the schema uses ON DELETE SET NULL for
+    # requests.target_user_id, which would otherwise leave approved invites
+    # pointing at nobody.
     conn.execute("DELETE FROM requests WHERE target_user_id=?", (user_id,))
-    for table in ("assignments", "picks", "coverage_preferences", "requests", "notifications"):
-        conn.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
     conn.execute("DELETE FROM users WHERE id=? AND role='employee'", (user_id,))
     conn.commit()
     conn.close()

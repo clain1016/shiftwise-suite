@@ -31,7 +31,9 @@ from werkzeug.security import check_password_hash, generate_password_hash
 _db_mod = importlib.import_module("shiftwise.db")
 from shiftwise.auth import login_required
 from shiftwise.db import (
+    POSTGRES_SCHEMA,
     SCHEMA,
+    database_engine,
     db,
     execute_sql,
     init_db,
@@ -78,11 +80,13 @@ __all__ = [
     "create_app",
     "app",
     "db",
+    "database_engine",
     "execute_sql",
     "init_db",
     "monday_of",
     "DB_PATH",
     "SCHEMA",
+    "POSTGRES_SCHEMA",
     "DAYS",
     "MIN_DAYS_OFF",
     "login_required",

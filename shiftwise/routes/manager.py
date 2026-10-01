@@ -12,7 +12,7 @@ from flask import (
 )
 
 from shiftwise.auth import login_required
-from shiftwise.db import db, monday_of
+from shiftwise.db import database_engine, db, monday_of
 from shiftwise.domain.constants import DAYS
 from shiftwise.domain.rules import assignment_block_reason
 from shiftwise.notify import notify
@@ -115,9 +115,14 @@ def delete_shift(shift_id):
         "(shift_id=? OR target_shift_id=?) AND "
         "kind IN ('swap','switch','manager_unassign','sick')",
         (shift_id, shift_id))
-    conn.execute("DELETE FROM picks WHERE shift_id=?", (shift_id,))
-    conn.execute("DELETE FROM coverage_preferences WHERE shift_id=?", (shift_id,))
-    conn.execute("DELETE FROM assignments WHERE shift_id=?", (shift_id,))
+    if database_engine() == "sqlite":
+        # The SQLite schema declares no foreign keys, so dependents are
+        # removed manually here. On PostgreSQL the ON DELETE CASCADE
+        # constraints in POSTGRES_SCHEMA drop them atomically with the
+        # shift row itself (Phase 2), so these statements are skipped.
+        conn.execute("DELETE FROM picks WHERE shift_id=?", (shift_id,))
+        conn.execute("DELETE FROM coverage_preferences WHERE shift_id=?", (shift_id,))
+        conn.execute("DELETE FROM assignments WHERE shift_id=?", (shift_id,))
     conn.execute("DELETE FROM shifts WHERE id=?", (shift_id,))
     conn.commit()
     conn.close()

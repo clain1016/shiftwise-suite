@@ -43,10 +43,15 @@ def test_database_engine_selection(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     assert sdb._database_engine() == "sqlite"
 
-    # init_db rejection under PostgreSQL
+    # init_db() supports PostgreSQL since Phase 2: it dispatches to the
+    # PostgreSQL DDL instead of raising. Full coverage (schema application,
+    # seeding, mock_seed through the psycopg facade) lives in
+    # tests/test_postgres_phase2.py using a stubbed backend.
     monkeypatch.setenv("SHIFTWISE_DB_ENGINE", "postgres")
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/testdb")
-    with pytest.raises(RuntimeError, match="phase 2"):
+    monkeypatch.setattr(sdb, "db", lambda: (_ for _ in ()).throw(
+        AssertionError("stubbed in test_postgres_phase2.py")))
+    with pytest.raises(AssertionError, match="stubbed in test_postgres_phase2"):
         sdb.init_db()
 
 

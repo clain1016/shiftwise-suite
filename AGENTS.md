@@ -22,7 +22,7 @@
 ## 4. Verification Standard
 - Before marking any phase complete, opening a PR, or deploying:
   - Run the full verification suite: `./tools/run_all.sh`
-- Ensure the full collected pytest unit & integration suite passes (currently 66 tests, 100% green).
+- Ensure the full collected pytest unit & integration suite passes (currently 83 tests, 100% green).
   - Ensure the 11-phase stress gauntlet and scenario simulations complete without error.
   - Ensure the live-week concurrency gauntlet (`tools/liveweek.py`) completes without harness error; its findings are recorded as artifacts in `tools/liveweek-artifacts/` (gitignored) for fixing agents — they are reports, not suite failures (`--strict` enforces them in CI).
   - Validate Docker Compose configuration with `docker compose config`.
@@ -32,3 +32,12 @@
   - Simulation harnesses (`tools/liveweek.py`, `tools/gauntlet.py`, `tools/scenario_demo.py`) must compute expected roster size and shift counts dynamically from `mock_seed.PREFS` / `DEMO_SHIFTS` rather than hardcoding constants.
 - **Transient Entity Namespace Isolation:**
   - Test harnesses that simulate transient hires, deletions, or dynamic users (e.g. `TRANSIENT_HIRES` in `liveweek.py`) must never reuse usernames present in `mock_seed.py` to prevent unique constraint collisions and state contamination.
+
+## 6. Known Issues & Concurrency Backlog
+- **Consult `docs/KNOWN_ISSUES.md`** before working on any concurrency, database locking, or data-integrity fix.
+  - The document catalogues real findings from `tools/liveweek.py` chaos/load testing, with root-cause analysis, affected code locations, and fix approaches.
+  - Items are severity-ranked (CRITICAL → MEDIUM). Work them one per PR, highest severity first.
+  - Each item includes a liveweek seed for reproducibility — re-run with `--seed N` to verify a fix.
+- **`docs/REFACTORING_BACKLOG.md`** lists structural refactors (code cleanliness, not bugs). Do not confuse these with known issues — they are separate work streams.
+- **`docs/POSTGRES_MIGRATION_PLAN.md`** contains the approved 5-phase engineering handoff for migrating from SQLite to PostgreSQL to resolve concurrency, locking, and multi-store scalability requirements.
+

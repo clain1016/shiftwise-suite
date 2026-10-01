@@ -1,6 +1,6 @@
 # Refactoring Backlog
 
-> Status: active backlog · Last reviewed: 2026-10-01
+> Status: all six items implemented (R1 merged; R3–R6 in review as drafts) · Last reviewed: 2026-10-01
 
 Bigger, judgment-call refactors left out of the mechanical cleanup in PR #13.
 Each item is specified so a future agent (or human) can pick it up and implement
@@ -57,6 +57,16 @@ before/after if feasible).
 
 **Risk.** This is the highest-blast-radius item here. One PR, no other changes
 mixed in, and a careful re-read of the final diff.
+
+**Status:** implemented in [PR #NN](https://github.com/clain1016/shiftwise-suite/pull/NN).
+
+`run_scheduler()` is now a thin orchestrator over eight phase helpers
+(`_begin_week`, `_collect_inputs`, `_prepare_rebuild`,
+`_run_assignment_rounds`, `_backfill_coverage`, `_resolve_swaps`,
+`_notify_schedule_changes`, `_finalize_week`) sharing an explicit
+per-run `_SchedulerState`. Move-only: full pytest suite green (115 passed),
+and the gauntlet / scenario_demo printed summaries are byte-identical
+before/after.
 
 ## R3 — `approve_request` dispatch dict
 

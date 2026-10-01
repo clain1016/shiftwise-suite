@@ -77,7 +77,9 @@ flowchart LR
    - If PostgreSQL:
      - Initialize a module-level `ConnectionPool(conninfo=DATABASE_URL, min_size=4, max_size=20)`.
      - Implement `db()` returning a connection wrapper or pooled connection.
-     - Configure row factory to return dict/attribute-accessible rows (`dict_row` from `psycopg.rows`) matching `sqlite3.Row` semantics (`row["id"]` and `row[0]`).
+     - Configure row factory to return dict/attribute-accessible rows matching `sqlite3.Row` semantics: positional index (`row[0]`), key access (`row["id"]`), and sequence value-iteration (`__iter__` yielding values for `id, name = row` unpacking).
+     - Invalidate connection references upon `close()` to protect against cross-thread operations on returned connections.
+     - Ensure connection/cursor facades return `self` on `__enter__` to preserve placeholder translation in context managers.
    - If SQLite (fallback / test mode):
      - Maintain existing `sqlite3.connect` logic with `busy_timeout=15000` and `foreign_keys=ON`.
 3. **Parameter Syntax Adapter:**
@@ -87,11 +89,13 @@ flowchart LR
      - Alternatively, standardize all queries on `%s` and adapt for SQLite, or use named parameters (`:name`).
 4. **App Facade Compatibility (`app.py`):**
    - Ensure `app:app` exports and test monkeypatching continue to propagate cleanly per `AGENTS.md` §2.
+   - Re-export `execute_sql` in `app.py` and `__all__`.
 
 #### Acceptance Criteria:
 - `requirements.txt` installs cleanly.
 - `python -c "import psycopg"` succeeds in `.venv`.
-- All existing 83 pytest tests continue to pass in SQLite mode without regression.
+- All existing pytest tests continue to pass in SQLite mode without regression (baseline 89 tests).
+- Automated tests in `tests/test_db_adapter.py` verify backend selection, qmark translation, row semantics, connection lease lifecycle, and `app.py` facade exports.
 
 ---
 

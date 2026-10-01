@@ -1,7 +1,9 @@
 """ShiftWise database connection, schema, and lifecycle management."""
+import atexit
 import os
 import sqlite3
 import sys
+import threading
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -88,8 +90,226 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 """
 
 
+_postgres_pool = None
+_postgres_pool_url = None
+_postgres_pool_lock = threading.Lock()
+
+
+def _database_engine():
+    """Select the configured database backend without opening a connection."""
+    configured = os.environ.get("SHIFTWISE_DB_ENGINE")
+    if configured is not None:
+        engine = configured.lower()
+        if engine == "sqlite":
+            return "sqlite"
+        if engine in ("postgres", "postgresql"):
+            if not os.environ.get("DATABASE_URL"):
+                raise RuntimeError(
+                    "DATABASE_URL is required when SHIFTWISE_DB_ENGINE selects PostgreSQL"
+                )
+            return "postgres"
+        raise ValueError(
+            "SHIFTWISE_DB_ENGINE must be one of: sqlite, postgres, postgresql"
+        )
+
+    database_url = os.environ.get("DATABASE_URL", "")
+    if database_url.lower().startswith(("postgres://", "postgresql://")):
+        return "postgres"
+    return "sqlite"
+
+
+def _qmark_to_psycopg(query):
+    """Translate qmark parameters outside SQL strings and comments."""
+    result = []
+    index = 0
+    state = "normal"
+    while index < len(query):
+        char = query[index]
+        next_char = query[index + 1] if index + 1 < len(query) else ""
+        if state == "normal":
+            if char == "'":
+                state = "single"
+                result.append(char)
+            elif char == '"':
+                state = "double"
+                result.append(char)
+            elif char == "-" and next_char == "-":
+                state = "line_comment"
+                result.extend((char, next_char))
+                index += 1
+            elif char == "/" and next_char == "*":
+                state = "block_comment"
+                result.extend((char, next_char))
+                index += 1
+            elif char == "?":
+                result.append("%s")
+            else:
+                result.append(char)
+        elif state == "single":
+            result.append(char)
+            if char == "'":
+                if next_char == "'":
+                    result.append(next_char)
+                    index += 1
+                else:
+                    state = "normal"
+        elif state == "double":
+            result.append(char)
+            if char == '"':
+                if next_char == '"':
+                    result.append(next_char)
+                    index += 1
+                else:
+                    state = "normal"
+        elif state == "line_comment":
+            result.append(char)
+            if char == "\n":
+                state = "normal"
+        else:
+            result.append(char)
+            if char == "*" and next_char == "/":
+                result.append(next_char)
+                index += 1
+                state = "normal"
+        index += 1
+    return "".join(result)
+
+
+class _PostgresRow(dict):
+    """A dict row with the positional indexing provided by sqlite3.Row."""
+
+    def __init__(self, values, description):
+        self._values = tuple(values)
+        names = tuple(
+            getattr(column, "name", column[0]) for column in description
+        )
+        super().__init__(zip(names, self._values))
+
+    def __getitem__(self, key):
+        if isinstance(key, (int, slice)):
+            return self._values[key]
+        return super().__getitem__(key)
+
+
+class _PostgresCursor:
+    """Cursor facade translating qmarks and adapting returned rows."""
+
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def execute(self, query, params=()):
+        self._cursor.execute(_qmark_to_psycopg(query), params)
+        return self
+
+    def executemany(self, query, params_seq):
+        self._cursor.executemany(_qmark_to_psycopg(query), params_seq)
+        return self
+
+    def _row(self, values):
+        if values is None:
+            return None
+        return _PostgresRow(values, self._cursor.description)
+
+    def fetchone(self):
+        return self._row(self._cursor.fetchone())
+
+    def fetchmany(self, size=None):
+        if size is None:
+            values = self._cursor.fetchmany()
+        else:
+            values = self._cursor.fetchmany(size)
+        return [self._row(row) for row in values]
+
+    def fetchall(self):
+        return [self._row(row) for row in self._cursor.fetchall()]
+
+    def __iter__(self):
+        while True:
+            row = self.fetchone()
+            if row is None:
+                return
+            yield row
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+
+class _PostgresConnection:
+    """Lease facade returning a physical connection to its pool on close."""
+
+    def __init__(self, pool, connection):
+        self._pool = pool
+        self._connection = connection
+        self._closed = False
+
+    def cursor(self, *args, **kwargs):
+        return _PostgresCursor(self._connection.cursor(*args, **kwargs))
+
+    def execute(self, query, params=()):
+        return self.cursor().execute(query, params)
+
+    def executemany(self, query, params_seq):
+        return self.cursor().executemany(query, params_seq)
+
+    def commit(self):
+        return self._connection.commit()
+
+    def rollback(self):
+        return self._connection.rollback()
+
+    def close(self):
+        if not self._closed:
+            self._closed = True
+            self._pool.putconn(self._connection)
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+
+def _postgres_pool_for(database_url):
+    global _postgres_pool, _postgres_pool_url
+    with _postgres_pool_lock:
+        if _postgres_pool is not None and _postgres_pool_url != database_url:
+            _postgres_pool.close()
+            _postgres_pool = None
+            _postgres_pool_url = None
+        if _postgres_pool is None:
+            from psycopg_pool import ConnectionPool
+
+            pool = ConnectionPool(
+                conninfo=database_url, min_size=4, max_size=20, open=False
+            )
+            try:
+                pool.open(wait=True)
+            except Exception:
+                pool.close()
+                raise
+            _postgres_pool = pool
+            _postgres_pool_url = database_url
+        return _postgres_pool
+
+
+def _close_postgres_pool():
+    global _postgres_pool, _postgres_pool_url
+    with _postgres_pool_lock:
+        if _postgres_pool is not None:
+            _postgres_pool.close()
+            _postgres_pool = None
+            _postgres_pool_url = None
+
+
+atexit.register(_close_postgres_pool)
+
+
 def db():
-    """Create and configure a SQLite connection for the current DB_PATH."""
+    """Create a connection for the selected SQLite or PostgreSQL backend."""
+    if _database_engine() == "postgres":
+        database_url = os.environ["DATABASE_URL"]
+        pool = _postgres_pool_for(database_url)
+        return _PostgresConnection(pool, pool.getconn())
+
+    if _postgres_pool is not None:
+        _close_postgres_pool()
     db_path = _current_db_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, timeout=15.0)
@@ -97,6 +317,11 @@ def db():
     conn.execute("PRAGMA busy_timeout=15000")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
+
+
+def execute_sql(conn, query, params=()):
+    """Execute a query through the selected connection's backend adapter."""
+    return conn.execute(query, params)
 
 
 def monday_of(d):
@@ -112,6 +337,10 @@ def _current_db_path():
 
 def init_db(seed_demo=False, mock_roster=False):
     """Initialize schema, apply migrations, enforce passwords, and seed data if empty."""
+    if _database_engine() == "postgres":
+        raise RuntimeError(
+            "init_db() does not support PostgreSQL until phase 2 supplies PostgreSQL schema"
+        )
     db_path = _current_db_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, timeout=15.0)

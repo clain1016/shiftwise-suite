@@ -115,6 +115,8 @@ to a beginner.
 
 ## R6 — Restore the `mock_seed` force guard
 
+**Status:** in review — draft PR #24 (`larry/backlog-r6-force-guard`), opened 2026-10-01.
+
 **Problem.** `mock_seed.seed()` used to refuse wiping a non-empty DB without
 `force=True`; the current version wipes unconditionally. All present callers are
 test/tooling/demo paths, but the rail existed for a reason.

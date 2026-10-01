@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import unittest
+import urllib.parse
 from pathlib import Path
 from unittest.mock import patch
 
@@ -72,7 +73,8 @@ class EmployeeScheduleLinkTests(unittest.TestCase):
         conn.execute("UPDATE users SET email=? WHERE id=?", ("alex@example.test", uid))
         conn.commit()
         conn.close()
-        with patch.object(appmod, "send_schedule_link", return_value="email") as send:
+        with patch("shiftwise.routes.roster.send_schedule_link",
+                     return_value="email") as send:
             response = self.client.post(
                 f"/manager/roster/{uid}/send-link", data={"channel": "email"},
                 follow_redirects=True)
@@ -84,7 +86,7 @@ class EmployeeScheduleLinkTests(unittest.TestCase):
         uid = self.employee_id()
         self.client.get("/logout")
         self.client.post("/login", data={"username": "alex", "password": "alex"})
-        with patch.object(appmod, "send_schedule_link") as send:
+        with patch("shiftwise.routes.roster.send_schedule_link") as send:
             response = self.client.post(f"/manager/roster/{uid}/send-link",
                                         data={"channel": "email"})
         self.assertEqual(response.status_code, 403)
@@ -95,10 +97,10 @@ class EmployeeScheduleLinkTests(unittest.TestCase):
                 "SHIFTWISE_SMTP_HOST": "smtp.example.test",
                 "SHIFTWISE_SMTP_FROM": "schedule@example.test",
                 "SHIFTWISE_SMTP_PORT": "587"}), \
-                patch.object(appmod.smtplib, "SMTP") as smtp:
+                patch("shiftwise.notify._smtplib") as smtplib_mock:
             appmod.send_schedule_link("email", "alex@example.test", "Alex",
                                       "https://staff.example.test/login")
-        server = smtp.return_value.__enter__.return_value
+        server = smtplib_mock.SMTP.return_value.__enter__.return_value
         server.starttls.assert_called_once_with()
         sent = server.send_message.call_args.args[0]
         self.assertEqual(sent["To"], "alex@example.test")
@@ -109,14 +111,14 @@ class EmployeeScheduleLinkTests(unittest.TestCase):
                 "SHIFTWISE_TWILIO_ACCOUNT_SID": "ACtest",
                 "SHIFTWISE_TWILIO_AUTH_TOKEN": "test-token",
                 "SHIFTWISE_TWILIO_FROM": "+15550000000"}), \
-                patch.object(appmod.urllib.request, "urlopen") as urlopen:
+                patch("shiftwise.notify._urllib.request.urlopen") as urlopen:
             urlopen.return_value.__enter__.return_value.status = 201
             appmod.send_schedule_link("sms", "+15551234567", "Alex",
                                       "https://staff.example.test/login")
         request_obj = urlopen.call_args.args[0]
         self.assertIn("api.twilio.com/2010-04-01/Accounts/ACtest/Messages.json",
                       request_obj.full_url)
-        body = appmod.urllib.parse.parse_qs(request_obj.data.decode())["Body"][0]
+        body = urllib.parse.parse_qs(request_obj.data.decode())["Body"][0]
         self.assertIn("https://staff.example.test/login", body)
 
     def test_invalid_contact_details_are_rejected_when_saving_roster(self):

@@ -1,6 +1,6 @@
 # Refactoring Backlog
 
-> Status: draft · Last verified: 2026-09-30
+> Status: all six items implemented (R1 merged; R3–R6 in review as drafts) · Last reviewed: 2026-10-01
 
 Bigger, judgment-call refactors left out of the mechanical cleanup in PR #13.
 Each item is specified so a future agent (or human) can pick it up and implement
@@ -22,29 +22,23 @@ it independently. Work them **one item per PR**, branched from current `master`.
 
 ## R1 — Untangle the hidden test seam (`notify.py` / `app.py`)
 
-**Problem.** `shiftwise/notify.py` (lines ~23-26) reaches into `sys.modules["app"]`
-to grab `smtplib`/`urllib`, and `tests/test_employee_schedule_links.py` patches
-`appmod.smtplib.SMTP`. The imports pyflakes flags in `app.py` (`smtplib`,
-`urllib.*`, some flask names) look dead but are load-bearing — deleting them
-silently breaks the test seam (worse: the `getattr` fallback means the test
-would try real SMTP).
+**Status:** implemented in [PR #23](https://github.com/clain1016/shiftwise-suite/pull/23).
 
-**Approach.**
-1. In `shiftwise/notify.py`, replace the `sys.modules` indirection with
-   module-level names, e.g. `_smtplib = smtplib` (and the urllib equivalent it
-   uses); call those throughout the module.
-2. Update `tests/test_employee_schedule_links.py` to patch
-   `shiftwise.notify._smtplib` instead of `appmod.smtplib` (check line ~99 and
-   any other patch sites — grep for `appmod.smtplib` repo-wide first).
-3. If decoupling from `app.py`, ensure `app.py`'s `_AppModule` facade
-   continues to fulfill `AGENTS.md` §2 ("Any module-level monkeypatching expected
-   by legacy tests (such as app.DB_PATH, app.smtplib.SMTP, app.urllib.request.urlopen,
-   and helper re-exports) must dynamically propagate to shiftwise.db and related
-   modules"). Verify with pyflakes that dead imports are eliminated while the
-   facade contract remains intact.
+Notification delivery uses module-level `_smtplib` and `_urllib` handles. The
+roster route uses its imported `send_schedule_link`. Neither module looks up
+`app` in `sys.modules`.
 
-**Acceptance.** `pyflakes app.py` clean; `pytest tests/test_employee_schedule_links.py -v`
-green; full suite green; no remaining `sys.modules["app"]` in `shiftwise/`.
+Tests patch these names directly. The `app.py` facade also forwards replacements
+of `app.smtplib`, `app.urllib`, and `app.send_schedule_link` to their consumers.
+Patching `app.smtplib.SMTP` or `app.urllib.request.urlopen` still works through
+the shared library objects. `tests/test_notification_facade.py` covers legacy
+patches and restoration without external delivery calls.
+
+**Verification.** Run `pytest tests/test_employee_schedule_links.py
+tests/test_notification_facade.py -v` and the full `./tools/run_all.sh` gate.
+Pyflakes must report no new findings in the touched files; the existing dynamic
+`DB_PATH` export warning remains tracked under R5. The `shiftwise/db.py` lookup
+of `app` for demo seeding is outside this notification refactor.
 
 ## R2 — Split `run_scheduler` into phases
 
@@ -63,6 +57,16 @@ before/after if feasible).
 
 **Risk.** This is the highest-blast-radius item here. One PR, no other changes
 mixed in, and a careful re-read of the final diff.
+
+**Status:** implemented in [PR #28](https://github.com/clain1016/shiftwise-suite/pull/28).
+
+`run_scheduler()` is now a thin orchestrator over eight phase helpers
+(`_begin_week`, `_collect_inputs`, `_prepare_rebuild`,
+`_run_assignment_rounds`, `_backfill_coverage`, `_resolve_swaps`,
+`_notify_schedule_changes`, `_finalize_week`) sharing an explicit
+per-run `_SchedulerState`. Move-only: full pytest suite green (115 passed),
+and the gauntlet / scenario_demo printed summaries are byte-identical
+before/after.
 
 ## R3 — `approve_request` dispatch dict
 

@@ -1,6 +1,7 @@
 """ShiftWise database connection, schema, and lifecycle management."""
 import atexit
 import os
+import re
 import sqlite3
 import sys
 import threading
@@ -89,6 +90,176 @@ CREATE TABLE IF NOT EXISTS login_attempts (
 );
 """
 
+# Production PostgreSQL DDL (Phase 2). Declarative foreign keys replace the
+# manual cascade deletions the SQLite schema requires: dependent rows are
+# removed atomically via ON DELETE CASCADE, while optional shift references
+# are nulled via ON DELETE SET NULL so request/notification history survives.
+POSTGRES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id BIGSERIAL PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'employee',
+    weekly_hours INTEGER DEFAULT 40,
+    employment_type TEXT NOT NULL DEFAULT 'part_time',
+    hired_on DATE,
+    station TEXT NOT NULL DEFAULT 'front',
+    email TEXT,
+    phone TEXT,
+    time_format TEXT NOT NULL DEFAULT '24h'
+);
+CREATE TABLE IF NOT EXISTS shifts (
+    id BIGSERIAL PRIMARY KEY,
+    week_start DATE NOT NULL,
+    day TEXT NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    slots INTEGER NOT NULL DEFAULT 1 CHECK (slots >= 1),
+    note TEXT,
+    area TEXT NOT NULL DEFAULT 'front'
+);
+CREATE TABLE IF NOT EXISTS picks (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    shift_id BIGINT NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
+    rank INTEGER NOT NULL,
+    UNIQUE(user_id, shift_id)
+);
+CREATE TABLE IF NOT EXISTS coverage_preferences (
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    shift_id BIGINT NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
+    willing BOOLEAN NOT NULL DEFAULT TRUE,
+    PRIMARY KEY(user_id, shift_id)
+);
+CREATE TABLE IF NOT EXISTS assignments (
+    id BIGSERIAL PRIMARY KEY,
+    shift_id BIGINT NOT NULL REFERENCES shifts(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'proposed',
+    UNIQUE(shift_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS requests (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL,
+    shift_id BIGINT REFERENCES shifts(id) ON DELETE SET NULL,
+    day TEXT,
+    target_shift_id BIGINT REFERENCES shifts(id) ON DELETE SET NULL,
+    vacation_start DATE,
+    vacation_end DATE,
+    week_start DATE,
+    target_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    reason TEXT,
+    status TEXT NOT NULL DEFAULT 'approved',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS notifications (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    shift_id BIGINT REFERENCES shifts(id) ON DELETE SET NULL,
+    kind TEXT NOT NULL,
+    message TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    read BOOLEAN NOT NULL DEFAULT FALSE
+);
+CREATE TABLE IF NOT EXISTS login_attempts (
+    key TEXT PRIMARY KEY,
+    failures INTEGER NOT NULL DEFAULT 0,
+    locked_until TIMESTAMPTZ
+);
+"""
+
+
+def _split_ddl(schema):
+    """Split a multi-statement DDL script into individual statements.
+
+    psycopg executes one statement per call, so the CREATE TABLE block is
+    split on statement terminators before being applied one at a time.
+    Semicolons inside single-quoted strings (with '' escapes), double-quoted
+    identifiers (with "" escapes), -- line comments, /* block comments, and
+    dollar-quoted bodies ($$ or $tag$) do not terminate statements.
+    """
+    statements = []
+    current = []
+    index = 0
+    length = len(schema)
+    state = "normal"
+    dollar_tag = ""
+    while index < length:
+        char = schema[index]
+        ahead = schema[index + 1] if index + 1 < length else ""
+        if state == "normal":
+            if char == "'":
+                state = "single"
+                current.append(char)
+            elif char == '"':
+                state = "double"
+                current.append(char)
+            elif char == "-" and ahead == "-":
+                state = "line_comment"
+                current.extend((char, ahead))
+                index += 1
+            elif char == "/" and ahead == "*":
+                state = "block_comment"
+                current.extend((char, ahead))
+                index += 1
+            elif char == "$":
+                tag_match = re.match(r"\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$",
+                                     schema[index:])
+                if tag_match:
+                    dollar_tag = tag_match.group(0)
+                    state = "dollar"
+                    current.append(dollar_tag)
+                    index += len(dollar_tag) - 1
+                else:
+                    current.append(char)
+            elif char == ";":
+                statement = "".join(current).strip()
+                if statement:
+                    statements.append(statement)
+                current = []
+            else:
+                current.append(char)
+        elif state == "single":
+            current.append(char)
+            if char == "'":
+                if ahead == "'":
+                    current.append(ahead)
+                    index += 1
+                else:
+                    state = "normal"
+        elif state == "double":
+            current.append(char)
+            if char == '"':
+                if ahead == '"':
+                    current.append(ahead)
+                    index += 1
+                else:
+                    state = "normal"
+        elif state == "line_comment":
+            current.append(char)
+            if char == "\n":
+                state = "normal"
+        elif state == "block_comment":
+            current.append(char)
+            if char == "*" and ahead == "/":
+                current.append(ahead)
+                index += 1
+                state = "normal"
+        else:  # dollar-quoted body: only the matching tag ends it
+            if schema.startswith(dollar_tag, index):
+                current.append(dollar_tag)
+                index += len(dollar_tag) - 1
+                state = "normal"
+            else:
+                current.append(char)
+        index += 1
+    tail = "".join(current).strip()
+    if tail:
+        statements.append(tail)
+    return statements
+
 
 _postgres_pool = None
 _postgres_pool_url = None
@@ -116,6 +287,11 @@ def _database_engine():
     if database_url.lower().startswith(("postgres://", "postgresql://")):
         return "postgres"
     return "sqlite"
+
+
+def database_engine():
+    """Return the configured database backend: "sqlite" or "postgres"."""
+    return _database_engine()
 
 
 def _qmark_to_psycopg(query):
@@ -328,7 +504,15 @@ def _postgres_pool_for(database_url):
             from psycopg_pool import ConnectionPool
 
             pool = ConnectionPool(
-                conninfo=database_url, min_size=4, max_size=20, open=False
+                conninfo=database_url, min_size=4, max_size=20, open=False,
+                # Defensive server-side timeouts: a hung or runaway query
+                # must not hold a pooled worker (or its locks) forever. The
+                # review caught `idle in transaction (aborted)` holders
+                # blocking DDL behind a transactionid lock; these GUCs bound
+                # that failure mode. Scheduler compute is CPU-bound in
+                # Python, so a 30s statement budget and 5s lock-wait budget
+                # are generous backstops, not tight limits.
+                kwargs={"statement_timeout": "30s", "lock_timeout": "5s"},
             )
             try:
                 pool.open(wait=True)
@@ -387,11 +571,150 @@ def _current_db_path():
 
 
 def init_db(seed_demo=False, mock_roster=False):
-    """Initialize schema, apply migrations, enforce passwords, and seed data if empty."""
+    """Initialize schema, apply migrations, enforce passwords, and seed data if empty.
+
+    Applies the SQLite DDL (SCHEMA) or the PostgreSQL DDL (POSTGRES_SCHEMA)
+    depending on the configured engine.
+    """
     if _database_engine() == "postgres":
+        _init_db_postgres(seed_demo=seed_demo, mock_roster=mock_roster)
+        return
+    _init_db_sqlite(seed_demo=seed_demo, mock_roster=mock_roster)
+
+
+def _ensure_passwords_hashed(conn, seed_demo):
+    """Hash plain-text passwords; require a bootstrap password for the demo manager."""
+    for user in execute_sql(conn, "SELECT id, username, password FROM users").fetchall():
+        password = user[2]
+        if password.startswith(("scrypt:", "pbkdf2:")):
+            continue
+        if user[1] == "manager" and password == "manager" and not seed_demo:
+            password = os.environ.get("SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD")
+            if not password or len(password) < 12:
+                conn.close()
+                raise RuntimeError(
+                    "Set SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD (at least 12 characters) "
+                    "to replace the demo manager password"
+                )
+        execute_sql(conn, "UPDATE users SET password=? WHERE id=?",
+                    (generate_password_hash(password), user[0]))
+
+
+def _seed_if_empty(conn, seed_demo, mock_roster):
+    """Seed bootstrap or demo data when the users table is empty.
+
+    Returns True when mock_seed.seed() took over (the connection is already
+    closed); otherwise the caller still has to commit and close.
+    """
+    if execute_sql(conn, "SELECT 1 FROM users LIMIT 1").fetchone():
+        return False
+    bootstrap_password = os.environ.get("SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD")
+    if mock_roster or seed_demo in ("8", "mock", 8) or (
+            seed_demo and os.environ.get("SHIFTWISE_DEMO_SEED") in ("1", "8", "mock")):
+        conn.close()
+        import mock_seed
+        target_mod = sys.modules.get("app") or sys.modules[__name__]
+        mock_seed.seed(target_mod)
+        return True
+    if not seed_demo and (not bootstrap_password or len(bootstrap_password) < 12):
+        conn.close()
         raise RuntimeError(
-            "init_db() does not support PostgreSQL until phase 2 supplies PostgreSQL schema"
+            "Set SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD (at least 12 characters) "
+            "to create the first manager"
         )
+    if not seed_demo:
+        execute_sql(
+            conn,
+            "INSERT INTO users (username, password, name, role, weekly_hours, "
+            "employment_type, station) VALUES (?,?,?,?,?,?,?)",
+            ("manager", generate_password_hash(bootstrap_password),
+             "Store Manager", "manager", 40, "full_time", "front"))
+    else:
+        conn.executemany(
+            "INSERT INTO users (username, password, name, role, weekly_hours,"
+            " employment_type, hired_on, station) VALUES (?,?,?,?,?,?,?,?)",
+            [
+                ("manager", generate_password_hash("manager"),
+                 "Store Manager", "manager", 40, "full_time", "2020-01-15", "front"),
+                ("alex", generate_password_hash("alex"),
+                 "Alex Rivera", "employee", 30, "full_time", "2021-03-01", "front"),
+                ("sam", generate_password_hash("sam"),
+                 "Sam Chen", "employee", 25, "part_time", "2023-06-10", "front"),
+                ("taylor", generate_password_hash("taylor"),
+                 "Taylor Brooks", "employee", 20, "part_time", "2025-02-11", "front"),
+                ("jordan", generate_password_hash("jordan"),
+                 "Jordan Diaz", "employee", 35, "part_time", "2024-11-20", "back"),
+                ("casey", generate_password_hash("casey"),
+                 "Casey Boots", "employee", 35, "part_time", "2023-05-01", "back"),
+                ("morgan", generate_password_hash("morgan"),
+                 "Morgan Vale", "employee", 40, "full_time", "2022-08-15", "back"),
+            ],
+        )
+        week = monday_of(date.today()).isoformat()
+        demo = [
+            (week, "Mon", "09:00", "17:00", 1, None, "front"),
+            (week, "Tue", "09:00", "17:00", 1, None, "front"),
+            (week, "Wed", "09:00", "17:00", 1, None, "front"),
+            (week, "Thu", "09:00", "17:00", 1, None, "front"),
+            (week, "Fri", "09:00", "17:00", 1, None, "front"),
+            (week, "Sat", "10:00", "18:00", 2, "Weekend rush", "front"),
+            (week, "Sun", "11:00", "16:00", 1, "Short day", "front"),
+            (week, "Mon", "06:00", "14:00", 1, None, "back"),
+            (week, "Tue", "06:00", "14:00", 1, None, "back"),
+            (week, "Wed", "06:00", "14:00", 1, None, "back"),
+            (week, "Thu", "06:00", "14:00", 1, None, "back"),
+            (week, "Fri", "11:00", "20:00", 1, "Dinner prep + service", "back"),
+            (week, "Sat", "10:00", "20:00", 1, "Weekend covers", "back"),
+            (week, "Sun", "10:00", "16:00", 1, "Brunch", "back"),
+        ]
+        conn.executemany(
+            "INSERT INTO shifts (week_start, day, start_time, end_time, slots, note, area) "
+            "VALUES (?,?,?,?,?,?,?)", demo)
+    return False
+
+
+def _init_db_postgres(seed_demo=False, mock_roster=False):
+    """Initialize the PostgreSQL schema and seed data (Phase 2).
+
+    Runs every POSTGRES_SCHEMA statement through execute_sql so qmark
+    placeholders are translated for psycopg. Declarative ON DELETE CASCADE /
+    ON DELETE SET NULL constraints replace the manual cascade deletions the
+    SQLite path still needs.
+    """
+    conn = db()
+    try:
+        for statement in _split_ddl(POSTGRES_SCHEMA):
+            execute_sql(conn, statement)
+        # The schema must be committed before the mock-seed handoff below:
+        # _seed_if_empty closes this lease and mock_seed.seed() opens its
+        # own pooled connection, which would otherwise roll the uncommitted
+        # DDL back (UndefinedTable on the first DELETE FROM).
+        conn.commit()
+        _ensure_passwords_hashed(conn, seed_demo)
+        if _seed_if_empty(conn, seed_demo, mock_roster):
+            # Mock path: _seed_if_empty closed this lease itself and
+            # mock_seed.seed() took over on its own connection; nothing
+            # left to commit here.
+            return
+        conn.commit()
+    except Exception:
+        # The mock-seed handoff closes the lease inside _seed_if_empty, so
+        # only roll back while the lease is still open: a closed facade
+        # raises on rollback and would mask the original error.
+        try:
+            conn.rollback()
+        except RuntimeError:
+            pass
+        raise
+    finally:
+        # close() is idempotent, so this is safe on the mock path where
+        # _seed_if_empty already returned the lease to the pool; without it
+        # a DDL failure would leak the slot and abandon AccessExclusive
+        # locks on the new tables.
+        conn.close()
+
+
+def _init_db_sqlite(seed_demo=False, mock_roster=False):
     db_path = _current_db_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, timeout=15.0)
@@ -431,82 +754,9 @@ def init_db(seed_demo=False, mock_roster=False):
     if "reason" not in rcols:
         conn.execute("ALTER TABLE requests ADD COLUMN reason TEXT")
 
-    for user in conn.execute("SELECT id, username, password FROM users").fetchall():
-        password = user[2]
-        if password.startswith(("scrypt:", "pbkdf2:")):
-            continue
-        if user[1] == "manager" and password == "manager" and not seed_demo:
-            password = os.environ.get("SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD")
-            if not password or len(password) < 12:
-                conn.close()
-                raise RuntimeError(
-                    "Set SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD (at least 12 characters) "
-                    "to replace the demo manager password"
-                )
-        conn.execute("UPDATE users SET password=? WHERE id=?",
-                     (generate_password_hash(password), user[0]))
+    _ensure_passwords_hashed(conn, seed_demo)
 
-    if not conn.execute("SELECT 1 FROM users LIMIT 1").fetchone():
-        bootstrap_password = os.environ.get("SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD")
-        if mock_roster or seed_demo in ("8", "mock", 8) or (
-                seed_demo and os.environ.get("SHIFTWISE_DEMO_SEED") in ("1", "8", "mock")):
-            conn.close()
-            import mock_seed
-            target_mod = sys.modules.get("app") or sys.modules[__name__]
-            mock_seed.seed(target_mod)
-            return
-        if not seed_demo and (not bootstrap_password or len(bootstrap_password) < 12):
-            conn.close()
-            raise RuntimeError(
-                "Set SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD (at least 12 characters) "
-                "to create the first manager"
-            )
-        if not seed_demo:
-            conn.execute(
-                "INSERT INTO users (username, password, name, role, weekly_hours, "
-                "employment_type, station) VALUES (?,?,?,?,?,?,?)",
-                ("manager", generate_password_hash(bootstrap_password),
-                 "Store Manager", "manager", 40, "full_time", "front"))
-        else:
-            conn.executemany(
-                "INSERT INTO users (username, password, name, role, weekly_hours,"
-                " employment_type, hired_on, station) VALUES (?,?,?,?,?,?,?,?)",
-                [
-                    ("manager", generate_password_hash("manager"),
-                     "Store Manager", "manager", 40, "full_time", "2020-01-15", "front"),
-                    ("alex", generate_password_hash("alex"),
-                     "Alex Rivera", "employee", 30, "full_time", "2021-03-01", "front"),
-                    ("sam", generate_password_hash("sam"),
-                     "Sam Chen", "employee", 25, "part_time", "2023-06-10", "front"),
-                    ("taylor", generate_password_hash("taylor"),
-                     "Taylor Brooks", "employee", 20, "part_time", "2025-02-11", "front"),
-                    ("jordan", generate_password_hash("jordan"),
-                     "Jordan Diaz", "employee", 35, "part_time", "2024-11-20", "back"),
-                    ("casey", generate_password_hash("casey"),
-                     "Casey Boots", "employee", 35, "part_time", "2023-05-01", "back"),
-                    ("morgan", generate_password_hash("morgan"),
-                     "Morgan Vale", "employee", 40, "full_time", "2022-08-15", "back"),
-                ],
-            )
-            week = monday_of(date.today()).isoformat()
-            demo = [
-                (week, "Mon", "09:00", "17:00", 1, None, "front"),
-                (week, "Tue", "09:00", "17:00", 1, None, "front"),
-                (week, "Wed", "09:00", "17:00", 1, None, "front"),
-                (week, "Thu", "09:00", "17:00", 1, None, "front"),
-                (week, "Fri", "09:00", "17:00", 1, None, "front"),
-                (week, "Sat", "10:00", "18:00", 2, "Weekend rush", "front"),
-                (week, "Sun", "11:00", "16:00", 1, "Short day", "front"),
-                (week, "Mon", "06:00", "14:00", 1, None, "back"),
-                (week, "Tue", "06:00", "14:00", 1, None, "back"),
-                (week, "Wed", "06:00", "14:00", 1, None, "back"),
-                (week, "Thu", "06:00", "14:00", 1, None, "back"),
-                (week, "Fri", "11:00", "20:00", 1, "Dinner prep + service", "back"),
-                (week, "Sat", "10:00", "20:00", 1, "Weekend covers", "back"),
-                (week, "Sun", "10:00", "16:00", 1, "Brunch", "back"),
-            ]
-            conn.executemany(
-                "INSERT INTO shifts (week_start, day, start_time, end_time, slots, note, area) "
-                "VALUES (?,?,?,?,?,?,?)", demo)
+    if _seed_if_empty(conn, seed_demo, mock_roster):
+        return
     conn.commit()
     conn.close()

@@ -66,6 +66,8 @@ mixed in, and a careful re-read of the final diff.
 
 ## R3 — `approve_request` dispatch dict
 
+**Status:** in review — draft PR #26 (`larry/backlog-r3-approve-dispatch`), opened 2026-10-01.
+
 **Problem.** `shiftwise/routes/manager.py:186` is ~127 lines of `if/elif` over the
 request kinds. Every new request type makes it longer.
 

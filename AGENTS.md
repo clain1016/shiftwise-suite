@@ -21,12 +21,23 @@
   - `git status` must be completely clean (`nothing to commit, working tree clean`) with no untracked artifacts.
 
 ## 4. Verification Standard
-- Before marking any phase complete, opening a PR, or deploying:
-  - Run the full verification suite: `./tools/run_all.sh`
-- Ensure the full collected pytest unit & integration suite passes (currently 89 tests, 100% green).
-  - Ensure the 11-phase stress gauntlet and scenario simulations complete without error.
-  - Ensure the live-week concurrency gauntlet (`tools/liveweek.py`) completes without harness error; its findings are recorded as artifacts in `tools/liveweek-artifacts/` (gitignored) for fixing agents — they are reports, not suite failures (`--strict` enforces them in CI).
-  - Validate Docker Compose configuration with `docker compose config`.
+
+**Tiered regimen — never run the full gate on every small change.**
+
+| When | Command | Cost |
+| --- | --- | --- |
+| While writing code | `pytest tests/<file>::<test>` (targeted) | seconds |
+| Wider check while writing code | `./tools/run_all.sh --fast` (pytest suite only) | ~3 min |
+| Before opening a PR or merging | `./tools/run_all.sh` (full gate) | ~6 min |
+| Full gate without the load check | `./tools/run_all.sh --no-liveweek` | ~5 min |
+
+- Before marking any phase complete, opening a PR, or deploying, the full gate (`./tools/run_all.sh`) must pass:
+  - the full collected pytest unit & integration suite passes 100% green;
+  - the 11-phase stress gauntlet (`tools/gauntlet.py`) and `tools/scenario_demo.py` complete without error;
+  - the live-week concurrency gauntlet (`tools/liveweek.py`) completes without harness error; its findings are recorded as artifacts in `tools/liveweek-artifacts/` (gitignored) for fixing agents — they are reports, not suite failures (`--strict` enforces them in CI). Duration is configurable via `--liveweek-seconds N` or `SHIFTWISE_LIVEWEEK_SECONDS`;
+  - `docker compose config` validates.
+- `./tools/run_all.sh --fast` runs the pytest suite only (for the inner development loop) and prints the full-gate reminder.
+- Dev extras (`requirements-dev.txt`: `pytest-timeout`, `pglast`) are required for a fully green suite: without `pglast` the PostgreSQL DDL parser test skips, and `pytest.ini` caps each test at 180 s so a lock wait or dialect error cannot hang a run.
 
 ## 5. Simulation Harness & Mock Roster Coupling
 - **Dynamic Staffing Expectations:**

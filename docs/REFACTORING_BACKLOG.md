@@ -58,7 +58,7 @@ before/after if feasible).
 **Risk.** This is the highest-blast-radius item here. One PR, no other changes
 mixed in, and a careful re-read of the final diff.
 
-**Status:** implemented in [PR #NN](https://github.com/clain1016/shiftwise-suite/pull/NN).
+**Status:** implemented in [PR #28](https://github.com/clain1016/shiftwise-suite/pull/28).
 
 `run_scheduler()` is now a thin orchestrator over eight phase helpers
 (`_begin_week`, `_collect_inputs`, `_prepare_rebuild`,

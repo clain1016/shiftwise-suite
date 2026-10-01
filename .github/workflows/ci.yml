@@ -1,9 +1,10 @@
 name: CI
 
-# Lean PR gate: the entrypoint guard (sub-second) plus the unit/integration
-# suite.  The heavy tiers (gauntlet, scenario, live-week, compose) stay in the
-# local full gate (./tools/run_all.sh) so PR feedback is fast; see AGENTS.md
-# section 4.
+# One dependency-free check: the tracked shell entrypoints keep their
+# executable bit.  Deliberately tiny -- no python/pytest/docker/venv setup;
+# the test suite runs locally via tools/run_all.sh (AGENTS.md section 4).
+# This is not a required status check: blocking merges needs branch protection,
+# which needs repo admin.
 
 on:
   push:
@@ -17,19 +18,8 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"  # matches the production Dockerfile
-          cache: pip
-
-      - name: Install dev extras
-        run: pip install -r requirements-dev.txt
-
-      # Invoked as "./tools/run_all.sh" on purpose: exercising the documented
-      # entrypoint is itself part of the contract under test.
-      - name: Entrypoint guard + unit/integration suite
-        run: ./tools/run_all.sh --fast
+      - name: Tracked entrypoints stay executable
+        run: ./tools/check_entrypoints.py

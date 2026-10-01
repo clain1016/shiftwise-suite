@@ -1846,7 +1846,7 @@ def seed_world(appmod, db_path: Path, rec):
     import mock_seed
     appmod.DB_PATH = db_path
     appmod.init_db(seed_demo=True)
-    mock_seed.seed(appmod)
+    mock_seed.seed(appmod, force=True)
     appmod.init_db(seed_demo=True)  # migration/hash pass, like tools/gauntlet.py
     con = appmod.db()
     con.execute(

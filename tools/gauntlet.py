@@ -22,7 +22,7 @@ else:
 
 appmod.DB_PATH = db_target
 appmod.init_db(seed_demo=True)
-seed(appmod)
+seed(appmod, force=True)
 appmod.init_db(seed_demo=True)
 
 use_csrf_aware_test_client(appmod.app)

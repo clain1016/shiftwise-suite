@@ -52,7 +52,7 @@ for suf in ("", "-wal", "-shm"):
     if p.exists():
         p.unlink()
 appmod.init_db(seed_demo=True)
-n_emp, n_days, n_picks = mock_seed.seed(appmod)
+n_emp, n_days, n_picks = mock_seed.seed(appmod, force=True)
 print(f"mock DB reseeded: {n_emp} employees, {n_days} days/house, "
       f"{n_picks} pre-seeded picks (wiped by phase 2)")
 

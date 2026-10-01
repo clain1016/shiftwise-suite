@@ -272,8 +272,11 @@ def test_init_db_postgres_commits_schema_before_mock_seed_handoff(monkeypatch):
     _postgres_env(monkeypatch)
     conn = _RecordingConn()
     monkeypatch.setattr(sdb, "db", lambda: conn)
-    monkeypatch.setattr(mock_seed, "seed",
-                        lambda appmod: conn.events.append("mock_seed.seed"))
+    seed_calls = []
+    monkeypatch.setattr(
+        mock_seed, "seed",
+        lambda appmod, force=False: (conn.events.append("mock_seed.seed"),
+                                     seed_calls.append(force)))
 
     sdb.init_db(mock_roster=True)
 
@@ -285,6 +288,8 @@ def test_init_db_postgres_commits_schema_before_mock_seed_handoff(monkeypatch):
     # The schema commit lands before mock_seed opens its own connection.
     assert "mock_seed.seed" in conn.events
     assert conn.events.index("commit") < conn.events.index("mock_seed.seed")
+    # The demo-seed handoff is an intended wipe: force=True must be passed.
+    assert seed_calls == [True]
 
 
 def test_init_db_postgres_rolls_back_and_returns_lease_on_ddl_failure(monkeypatch):
@@ -390,6 +395,9 @@ class _PsycopgStubCursor:
                         dt_time.fromisoformat(r["start_time"]))
                        for r in store["shifts"]],
                       ["id", "day", "area", "start_time"])
+        elif query == "SELECT 1 FROM users LIMIT 1":
+            # R6 force guard probe: empty store -> guard passes.
+            self._set([(1,)] if store["users"] else [], ["1"])
         elif query == "SELECT id, station FROM users WHERE username=%s":
             match = [r for r in store["users"] if r["username"] == params[0]]
             self._set([(m["id"], m["station"]) for m in match], ["id", "station"])
@@ -459,7 +467,9 @@ def test_mock_seed_runs_cleanly_through_postgres_facade():
         assert "?" not in sql, f"untranslated qmark in {sql!r}"
     assert any("%s" in sql and params for sql, params in stub.queries)
     # Spot-check translated statements.
-    assert stub.queries[0][0] == "DELETE FROM picks"
+    # R6: the first statement is now the force-guard emptiness probe.
+    assert stub.queries[0][0] == "SELECT 1 FROM users LIMIT 1"
+    assert stub.queries[1][0] == "DELETE FROM picks"
     assert any(q.startswith("INSERT INTO users (username, password, name, role, "
                             "weekly_hours, employment_type, hired_on, station) "
                             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)")

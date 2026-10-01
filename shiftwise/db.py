@@ -614,7 +614,7 @@ def _seed_if_empty(conn, seed_demo, mock_roster):
         conn.close()
         import mock_seed
         target_mod = sys.modules.get("app") or sys.modules[__name__]
-        mock_seed.seed(target_mod)
+        mock_seed.seed(target_mod, force=True)
         return True
     if not seed_demo and (not bootstrap_password or len(bootstrap_password) < 12):
         conn.close()

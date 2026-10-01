@@ -53,7 +53,7 @@ for t in ("users", "shifts", "picks", "coverage_preferences", "assignments",
     conn.execute(f"DELETE FROM {t}")
 conn.commit()
 conn.close()
-mock_seed.seed(appmod)
+mock_seed.seed(appmod, force=True)
 
 use_csrf_aware_test_client(appmod.app)
 client = appmod.app.test_client()

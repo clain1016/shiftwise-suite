@@ -1,8 +1,10 @@
 # PostgreSQL Migration Plan & Development Handoff
 
-> Status: Approved Architecture Plan · Target: Multi-worker concurrency, zero-lock contention, multi-store scalability · Date: 2026-09-30
+> Status: Phase 1 complete (merged 2026-10-01) · Phases 2–5 pending · Target: Multi-worker concurrency, zero-lock contention, multi-store scalability · Last updated: 2026-10-01
 
 This document serves as the complete, step-by-step engineering specification and forward handoff for migrating ShiftWise Suite from SQLite to PostgreSQL. Any future agent or engineer can pick up this roadmap and implement it phase-by-phase without ambiguity.
+
+> **Current state (2026-10-01):** Phase 1 is merged to `master` as `59549352` (PR #16). The adapter is in place and fully tested — `db()` selects the backend, qmark SQL is translated, rows emulate `sqlite3.Row` — but `init_db()` still refuses PostgreSQL until Phase 2 supplies the schema. Next up: Phase 2 (schema & constraints).
 
 ---
 
@@ -66,7 +68,7 @@ flowchart LR
 
 ---
 
-### Phase 1: Database Adapter Layer & Driver (PR 1)
+### Phase 1: Database Adapter Layer & Driver — COMPLETE (PR #16, merged 2026-10-01 as `59549352`)
 
 **Objective:** Introduce driver dependencies and build a unified connection manager in `shiftwise/db.py` that supports `DATABASE_URL` (PostgreSQL) while preserving SQLite compatibility for lightweight in-memory/in-process tests.
 
@@ -96,6 +98,13 @@ flowchart LR
 - `python -c "import psycopg"` succeeds in `.venv`.
 - All existing pytest tests continue to pass in SQLite mode without regression (baseline 89 tests).
 - Automated tests in `tests/test_db_adapter.py` verify backend selection, qmark translation, row semantics, connection lease lifecycle, and `app.py` facade exports.
+
+**Delivered 2026-10-01** (PR #16, merge `59549352`): all tasks above, plus two review fixes —
+literal `%` is escaped as `%%` in `_qmark_to_psycopg` (psycopg treats `%` as a placeholder
+introducer even inside string literals, so the scheduler's `LIKE 'No cover available%'`
+query would otherwise raise a placeholder-parsing error), and `_PostgresConnection.close()`
+returns the physical connection inside try/finally so a `putconn` failure detaches the lease
+instead of leaking it. Full suite green on the merged head: 89 passed.
 
 ---
 
@@ -227,7 +236,7 @@ flowchart LR
    - `shiftwise/notify.py`
 
 #### Acceptance Criteria:
-- Full pytest test suite (all 83 tests) passes 100% green against PostgreSQL.
+- Full pytest test suite (all 89 tests) passes 100% green against PostgreSQL.
 - No `SyntaxError` or dialect mismatch errors in any route.
 
 ---

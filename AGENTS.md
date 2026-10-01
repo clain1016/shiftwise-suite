@@ -16,12 +16,19 @@
 - **No Stale Test Artifacts:**
   - Tests and simulation harnesses may generate SQLite databases (`app.db`, `test_*.db`, `shiftwise-mock/mock.db`, `tools/*.db`) and cache directories (`__pycache__`, `.pytest_cache`).
   - Always clean up temporary databases and caches before committing, creating PRs, or proceeding to deployment.
+  - Simulation tools like `tools/liveweek.py` and `tools/scenario_demo.py` write local databases (`tools/*.db`); remove these before pushing or checking status.
   - `git status` must be completely clean (`nothing to commit, working tree clean`) with no untracked artifacts.
 
 ## 4. Verification Standard
 - Before marking any phase complete, opening a PR, or deploying:
   - Run the full verification suite: `./tools/run_all.sh`
--  Ensure the full collected pytest unit & integration suite passes (currently 66 tests, 100% green).
+- Ensure the full collected pytest unit & integration suite passes (currently 66 tests, 100% green).
   - Ensure the 11-phase stress gauntlet and scenario simulations complete without error.
   - Ensure the live-week concurrency gauntlet (`tools/liveweek.py`) completes without harness error; its findings are recorded as artifacts in `tools/liveweek-artifacts/` (gitignored) for fixing agents — they are reports, not suite failures (`--strict` enforces them in CI).
   - Validate Docker Compose configuration with `docker compose config`.
+
+## 5. Simulation Harness & Mock Roster Coupling
+- **Dynamic Staffing Expectations:**
+  - Simulation harnesses (`tools/liveweek.py`, `tools/gauntlet.py`, `tools/scenario_demo.py`) must compute expected roster size and shift counts dynamically from `mock_seed.PREFS` / `DEMO_SHIFTS` rather than hardcoding constants.
+- **Transient Entity Namespace Isolation:**
+  - Test harnesses that simulate transient hires, deletions, or dynamic users (e.g. `TRANSIENT_HIRES` in `liveweek.py`) must never reuse usernames present in `mock_seed.py` to prevent unique constraint collisions and state contamination.

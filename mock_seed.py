@@ -89,7 +89,9 @@ def seed(appmod):
         "VALUES (?,?,?,?,?,?,?)",
         [(week, d, s, e, n, note, area) for area, d, s, e, n, note in DEMO_SHIFTS])
 
-    shift_ids = {(r["area"], r["day"], r["start_time"]): r["id"]
+    # PostgreSQL returns TIME columns as datetime.time, SQLite as TEXT;
+    # normalize to HH:MM so the lookup key matches SHIFT_WINDOWS.
+    shift_ids = {(r["area"], r["day"], str(r["start_time"])[:5]): r["id"]
                  for r in conn.execute("SELECT id, day, area, start_time FROM shifts")}
     for username, prefs in PREFS.items():
         uid = conn.execute(

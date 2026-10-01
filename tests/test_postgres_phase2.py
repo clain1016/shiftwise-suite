@@ -10,6 +10,7 @@ PostgreSQL while keeping the manual cascades on SQLite.
 """
 import importlib
 import re
+from datetime import time as dt_time
 from types import SimpleNamespace
 
 import pytest
@@ -46,14 +47,44 @@ def test_postgres_ddl_uses_bigserial_primary_keys():
         assert pattern.search(sdb.POSTGRES_SCHEMA), table
 
 
-def test_postgres_ddl_cascade_constraints():
+def test_postgres_ddl_fk_delete_actions_per_column():
+    """Pin the exact ON DELETE action of every foreign key, per column.
+
+    Count-based pins can be gamed by a compensating swap between two
+    columns; this pins each (table, column) pair individually.
+    """
+    expected = {
+        ("picks", "user_id"): "CASCADE",
+        ("picks", "shift_id"): "CASCADE",
+        ("coverage_preferences", "user_id"): "CASCADE",
+        ("coverage_preferences", "shift_id"): "CASCADE",
+        ("assignments", "shift_id"): "CASCADE",
+        ("assignments", "user_id"): "CASCADE",
+        ("requests", "user_id"): "CASCADE",
+        ("requests", "shift_id"): "SET NULL",
+        ("requests", "target_shift_id"): "SET NULL",
+        ("requests", "target_user_id"): "SET NULL",
+        ("notifications", "user_id"): "CASCADE",
+        ("notifications", "shift_id"): "SET NULL",
+    }
     schema = sdb.POSTGRES_SCHEMA
-    # picks/user+shift, coverage/user+shift, assignments/shift+user,
-    # requests/user, notifications/user
-    assert schema.count("ON DELETE CASCADE") == 8
-    # requests/shift, requests/target_shift, requests/target_user,
-    # notifications/shift
-    assert schema.count("ON DELETE SET NULL") == 4
+    for (table, column), action in expected.items():
+        block = re.search(
+            rf"CREATE TABLE IF NOT EXISTS {table} \((.*?)\n\);",
+            schema, re.DOTALL,
+        )
+        assert block, f"table {table} not found in POSTGRES_SCHEMA"
+        match = re.search(
+            rf"\b{column}\b[^,]*?REFERENCES \w+\(id\) ON DELETE (CASCADE|SET NULL)",
+            block.group(1),
+        )
+        assert match, f"{table}.{column}: no FK with a delete action"
+        assert match.group(1) == action, (
+            f"{table}.{column}: expected ON DELETE {action}, "
+            f"found ON DELETE {match.group(1)}"
+        )
+    # No more and no fewer FKs than pinned above.
+    assert len(re.findall(r"REFERENCES \w+\(id\)", schema)) == len(expected)
 
 
 def test_postgres_ddl_every_fk_declares_delete_action():
@@ -87,6 +118,42 @@ def test_split_ddl_yields_individual_create_statements():
     assert all(s.startswith("CREATE TABLE IF NOT EXISTS") for s in statements)
 
 
+def test_split_ddl_ignores_semicolons_in_strings_comments_and_dollar_quotes():
+    ddl = (
+        "CREATE TABLE t (note TEXT DEFAULT 'a;b');\n"
+        "-- a line comment with ; semicolon\n"
+        "CREATE TABLE u (id INT); /* block ; comment */\n"
+        'CREATE TABLE v ("weird;name" INT);\n'
+        "CREATE FUNCTION f() RETURNS void AS $$\n"
+        "BEGIN RAISE NOTICE 'x;y'; END;\n"
+        "$$ LANGUAGE plpgsql;"
+    )
+    statements = sdb._split_ddl(ddl)
+    assert len(statements) == 4
+    assert statements[0] == "CREATE TABLE t (note TEXT DEFAULT 'a;b')"
+    assert statements[1].endswith("CREATE TABLE u (id INT)")
+    # Comments attach to the statement they precede; the quoted identifier
+    # keeps its semicolon.
+    assert statements[2].endswith('CREATE TABLE v ("weird;name" INT)')
+    assert "/* block ; comment */" in statements[2]
+    assert statements[3].startswith("CREATE FUNCTION f()")
+    assert "RAISE NOTICE 'x;y'" in statements[3]
+    assert statements[3].endswith("$$ LANGUAGE plpgsql")
+
+
+def test_split_ddl_handles_tagged_dollar_quotes_and_escapes():
+    ddl = (
+        "CREATE FUNCTION g() RETURNS void AS $body$\n"
+        "BEGIN RAISE NOTICE 'it''s; here'; END;\n"
+        "$body$ LANGUAGE plpgsql;\n"
+        "CREATE TABLE w (note TEXT DEFAULT 'don''t; split');"
+    )
+    statements = sdb._split_ddl(ddl)
+    assert len(statements) == 2
+    assert "RAISE NOTICE 'it''s; here'" in statements[0]
+    assert statements[1] == "CREATE TABLE w (note TEXT DEFAULT 'don''t; split')"
+
+
 def test_database_engine_public_accessor():
     assert sdb.database_engine() == sdb._database_engine()
     assert appmod.database_engine is sdb.database_engine
@@ -115,23 +182,31 @@ class _RecordingConn:
     def __init__(self, handler=None):
         self.statements = []        # list of (sql, params)
         self.executemany_calls = []  # list of (sql, [params, ...])
+        self.events = []            # ordered event log ("execute", "commit", ...)
         self.committed = False
         self.closed = False
         self._handler = handler or (lambda sql, params: [])
 
     def execute(self, sql, params=()):
         self.statements.append((sql, params))
+        self.events.append("execute")
         return _Rows(self._handler(sql, params))
 
     def executemany(self, sql, seq):
         seq = list(seq)
         self.executemany_calls.append((sql, seq))
+        self.events.append("executemany")
         return None
 
     def commit(self):
+        self.events.append("commit")
         self.committed = True
 
+    def rollback(self):
+        self.events.append("rollback")
+
     def close(self):
+        self.events.append("close")
         self.closed = True
 
 
@@ -183,6 +258,73 @@ def test_init_db_postgres_rejects_short_bootstrap_password(monkeypatch):
     monkeypatch.setattr(sdb, "db", lambda: conn)
     with pytest.raises(RuntimeError, match="SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD"):
         sdb.init_db()
+
+
+def test_init_db_postgres_commits_schema_before_mock_seed_handoff(monkeypatch):
+    """Regression test for the review's Blocker 1.
+
+    _seed_if_empty closes the init lease and mock_seed.seed() opens its own
+    pooled connection; the DDL commit must land before that handoff or the
+    pool rolls the uncommitted schema back (UndefinedTable on the first
+    DELETE FROM). The recording facade is faithful here: commit/close are
+    real ordered events, not no-ops.
+    """
+    _postgres_env(monkeypatch)
+    conn = _RecordingConn()
+    monkeypatch.setattr(sdb, "db", lambda: conn)
+    monkeypatch.setattr(mock_seed, "seed",
+                        lambda appmod: conn.events.append("mock_seed.seed"))
+
+    sdb.init_db(mock_roster=True)
+
+    # The PG path applies exactly POSTGRES_SCHEMA (statement-split), not SCHEMA.
+    creates = [sql for sql, _ in conn.statements
+               if sql.startswith("CREATE TABLE IF NOT EXISTS")]
+    assert creates == sdb._split_ddl(sdb.POSTGRES_SCHEMA)
+    assert not any("INTEGER PRIMARY KEY" in sql for sql in creates)
+    # The schema commit lands before mock_seed opens its own connection.
+    assert "mock_seed.seed" in conn.events
+    assert conn.events.index("commit") < conn.events.index("mock_seed.seed")
+
+
+def test_init_db_postgres_rolls_back_and_returns_lease_on_ddl_failure(monkeypatch):
+    """_init_db_postgres must not leak the pooled lease on failure."""
+    _postgres_env(monkeypatch)
+
+    class _FailingConn(_RecordingConn):
+        def execute(self, sql, params=()):
+            if sql.startswith("CREATE TABLE"):
+                raise RuntimeError("simulated DDL failure")
+            return super().execute(sql, params)
+
+    conn = _FailingConn()
+    monkeypatch.setattr(sdb, "db", lambda: conn)
+    with pytest.raises(RuntimeError, match="simulated DDL failure"):
+        sdb.init_db()
+    assert "rollback" in conn.events
+    assert conn.closed
+
+
+def test_postgres_pool_sets_defensive_timeouts(monkeypatch):
+    """The pool must bound runaway statements and lock waits server-side."""
+    import psycopg_pool
+    captured = {}
+
+    class _FakePool:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def open(self, wait=True):
+            pass
+
+    monkeypatch.setattr(psycopg_pool, "ConnectionPool", _FakePool)
+    monkeypatch.setattr(sdb, "_postgres_pool", None)
+    monkeypatch.setattr(sdb, "_postgres_pool_url", None)
+
+    sdb._postgres_pool_for("postgresql://u:p@localhost:5432/db")
+
+    assert captured["kwargs"]["statement_timeout"] == "30s"
+    assert captured["kwargs"]["lock_timeout"] == "5s"
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +383,11 @@ class _PsycopgStubCursor:
             store["picks"].append(row)
             self._set([], [])
         elif query == "SELECT id, day, area, start_time FROM shifts":
-            self._set([(r["id"], r["day"], r["area"], r["start_time"])
+            # Faithful to PostgreSQL, which adapts TIME to datetime.time
+            # (SQLite returns TEXT). The seed must normalize these to HH:MM;
+            # a stub that fabricates strings would hide that bug.
+            self._set([(r["id"], r["day"], r["area"],
+                        dt_time.fromisoformat(r["start_time"]))
                        for r in store["shifts"]],
                       ["id", "day", "area", "start_time"])
         elif query == "SELECT id, station FROM users WHERE username=%s":

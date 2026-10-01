@@ -1,6 +1,7 @@
 """ShiftWise database connection, schema, and lifecycle management."""
 import atexit
 import os
+import re
 import sqlite3
 import sys
 import threading
@@ -175,8 +176,89 @@ def _split_ddl(schema):
 
     psycopg executes one statement per call, so the CREATE TABLE block is
     split on statement terminators before being applied one at a time.
+    Semicolons inside single-quoted strings (with '' escapes), double-quoted
+    identifiers (with "" escapes), -- line comments, /* block comments, and
+    dollar-quoted bodies ($$ or $tag$) do not terminate statements.
     """
-    return [statement.strip() for statement in schema.split(";") if statement.strip()]
+    statements = []
+    current = []
+    index = 0
+    length = len(schema)
+    state = "normal"
+    dollar_tag = ""
+    while index < length:
+        char = schema[index]
+        ahead = schema[index + 1] if index + 1 < length else ""
+        if state == "normal":
+            if char == "'":
+                state = "single"
+                current.append(char)
+            elif char == '"':
+                state = "double"
+                current.append(char)
+            elif char == "-" and ahead == "-":
+                state = "line_comment"
+                current.extend((char, ahead))
+                index += 1
+            elif char == "/" and ahead == "*":
+                state = "block_comment"
+                current.extend((char, ahead))
+                index += 1
+            elif char == "$":
+                tag_match = re.match(r"\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$",
+                                     schema[index:])
+                if tag_match:
+                    dollar_tag = tag_match.group(0)
+                    state = "dollar"
+                    current.append(dollar_tag)
+                    index += len(dollar_tag) - 1
+                else:
+                    current.append(char)
+            elif char == ";":
+                statement = "".join(current).strip()
+                if statement:
+                    statements.append(statement)
+                current = []
+            else:
+                current.append(char)
+        elif state == "single":
+            current.append(char)
+            if char == "'":
+                if ahead == "'":
+                    current.append(ahead)
+                    index += 1
+                else:
+                    state = "normal"
+        elif state == "double":
+            current.append(char)
+            if char == '"':
+                if ahead == '"':
+                    current.append(ahead)
+                    index += 1
+                else:
+                    state = "normal"
+        elif state == "line_comment":
+            current.append(char)
+            if char == "\n":
+                state = "normal"
+        elif state == "block_comment":
+            current.append(char)
+            if char == "*" and ahead == "/":
+                current.append(ahead)
+                index += 1
+                state = "normal"
+        else:  # dollar-quoted body: only the matching tag ends it
+            if schema.startswith(dollar_tag, index):
+                current.append(dollar_tag)
+                index += len(dollar_tag) - 1
+                state = "normal"
+            else:
+                current.append(char)
+        index += 1
+    tail = "".join(current).strip()
+    if tail:
+        statements.append(tail)
+    return statements
 
 
 _postgres_pool = None
@@ -422,7 +504,15 @@ def _postgres_pool_for(database_url):
             from psycopg_pool import ConnectionPool
 
             pool = ConnectionPool(
-                conninfo=database_url, min_size=4, max_size=20, open=False
+                conninfo=database_url, min_size=4, max_size=20, open=False,
+                # Defensive server-side timeouts: a hung or runaway query
+                # must not hold a pooled worker (or its locks) forever. The
+                # review caught `idle in transaction (aborted)` holders
+                # blocking DDL behind a transactionid lock; these GUCs bound
+                # that failure mode. Scheduler compute is CPU-bound in
+                # Python, so a 30s statement budget and 5s lock-wait budget
+                # are generous backstops, not tight limits.
+                kwargs={"statement_timeout": "30s", "lock_timeout": "5s"},
             )
             try:
                 pool.open(wait=True)
@@ -592,13 +682,36 @@ def _init_db_postgres(seed_demo=False, mock_roster=False):
     SQLite path still needs.
     """
     conn = db()
-    for statement in _split_ddl(POSTGRES_SCHEMA):
-        execute_sql(conn, statement)
-    _ensure_passwords_hashed(conn, seed_demo)
-    if _seed_if_empty(conn, seed_demo, mock_roster):
-        return
-    conn.commit()
-    conn.close()
+    try:
+        for statement in _split_ddl(POSTGRES_SCHEMA):
+            execute_sql(conn, statement)
+        # The schema must be committed before the mock-seed handoff below:
+        # _seed_if_empty closes this lease and mock_seed.seed() opens its
+        # own pooled connection, which would otherwise roll the uncommitted
+        # DDL back (UndefinedTable on the first DELETE FROM).
+        conn.commit()
+        _ensure_passwords_hashed(conn, seed_demo)
+        if _seed_if_empty(conn, seed_demo, mock_roster):
+            # Mock path: _seed_if_empty closed this lease itself and
+            # mock_seed.seed() took over on its own connection; nothing
+            # left to commit here.
+            return
+        conn.commit()
+    except Exception:
+        # The mock-seed handoff closes the lease inside _seed_if_empty, so
+        # only roll back while the lease is still open: a closed facade
+        # raises on rollback and would mask the original error.
+        try:
+            conn.rollback()
+        except RuntimeError:
+            pass
+        raise
+    finally:
+        # close() is idempotent, so this is safe on the mock path where
+        # _seed_if_empty already returned the lease to the pool; without it
+        # a DDL failure would leak the slot and abandon AccessExclusive
+        # locks on the new tables.
+        conn.close()
 
 
 def _init_db_sqlite(seed_demo=False, mock_roster=False):

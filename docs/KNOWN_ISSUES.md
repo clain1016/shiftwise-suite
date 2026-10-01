@@ -362,14 +362,24 @@ If the roadmap demands PostgreSQL (e.g. for multi-tenant cloud hosting or multi-
 
 ### 4. Recommendation & Roadmap
 
-1. **Phase 1 (Immediate - Fix the Architectural Flaws in SQLite)**:
-   - **Debounce Scheduler Execution**: When an employee submits picks, record the picks in the database (a 2ms operation) and schedule a debounced background run of `run_scheduler` (or set a `rebuild_needed` flag).
-   - **Eliminate Write-on-Read**: Move the dashboard notification mark-read out of `GET /` into a dedicated async beacon or user-initiated action.
-   - **Add Retry Loop**: Wrap SQLite transactions in a 3-attempt exponential backoff handler for `OperationalError: database is locked`.
-   - *Verification*: Re-run `tools/liveweek.py --seed 42 --strict` to verify that all HTTP 500s and latency spikes vanish on SQLite.
+For full implementation details, task checklists, and forward engineering handoffs across all 5 phases, see [**`docs/POSTGRES_MIGRATION_PLAN.md`**](POSTGRES_MIGRATION_PLAN.md).
 
-2. **Phase 2 (When Scaling Beyond a Single Store)**:
-   - Migrate to PostgreSQL using the blueprint above once multi-store multi-tenancy or multi-container horizontal scaling is scheduled on the product roadmap.
+1. **Phase 1: Database Adapter Layer & Driver (PR 1)**
+   - Add `psycopg[binary,pool]` to `requirements.txt`.
+   - Update `shiftwise/db.py` to support `DATABASE_URL` with connection pooling, while maintaining SQLite fallback for lightweight development/testing.
+   - Abstract parameter placeholders (`?` vs `%s`).
+2. **Phase 2: PostgreSQL Schema, DDL & Relational Constraints (PR 2)**
+   - Define PostgreSQL DDL with `BIGSERIAL`, `TIMESTAMPTZ`, `BOOLEAN`, and explicit `ON DELETE CASCADE` foreign keys.
+   - Eliminate manual cascade deletes in `routes/manager.py` and `routes/roster.py`.
+3. **Phase 3: Route & Engine Query Standardization (PR 3)**
+   - Standardize `INSERT ... ON CONFLICT` upserts and date/time functions across all routes and scheduler algorithms.
+4. **Phase 4: Scheduler Concurrency, Advisory Locks & Debounce (PR 4)**
+   - Replace `BEGIN IMMEDIATE` with PostgreSQL advisory locks (`pg_try_advisory_xact_lock`).
+   - Debounce pick submission rebuilds and remove write-on-read from `GET /`.
+   - Add row-level locking (`SELECT ... FOR UPDATE`) in `coverage_plan` and `manager_assign` to prevent capacity over-staffing (C2).
+5. **Phase 5: Container Orchestration, Deployment & CI (PR 5)**
+   - Add `postgres:16-alpine` to `docker-compose.yml` with healthchecks, persistent volumes, and secret management.
+   - Verify 100% green pass on `tools/liveweek.py --seed 42 --strict`.
 
 ---
 

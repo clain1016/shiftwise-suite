@@ -39,4 +39,5 @@
   - Items are severity-ranked (CRITICAL → MEDIUM). Work them one per PR, highest severity first.
   - Each item includes a liveweek seed for reproducibility — re-run with `--seed N` to verify a fix.
 - **`docs/REFACTORING_BACKLOG.md`** lists structural refactors (code cleanliness, not bugs). Do not confuse these with known issues — they are separate work streams.
+- **`docs/POSTGRES_MIGRATION_PLAN.md`** contains the approved 5-phase engineering handoff for migrating from SQLite to PostgreSQL to resolve concurrency, locking, and multi-store scalability requirements.
 

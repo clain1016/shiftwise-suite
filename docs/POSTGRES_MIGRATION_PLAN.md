@@ -1,10 +1,10 @@
 # PostgreSQL Migration Plan & Development Handoff
 
-> Status: Phase 1 complete (merged 2026-10-01) · Phases 2–5 pending · Target: Multi-worker concurrency, zero-lock contention, multi-store scalability · Last updated: 2026-10-01
+> Status: Phase 1 complete (merged 2026-10-01) · Phase 2 in review (draft PR #17) · Phases 3–5 pending · Target: Multi-worker concurrency, zero-lock contention, multi-store scalability · Last updated: 2026-10-01
 
 This document serves as the complete, step-by-step engineering specification and forward handoff for migrating ShiftWise Suite from SQLite to PostgreSQL. Any future agent or engineer can pick up this roadmap and implement it phase-by-phase without ambiguity.
 
-> **Current state (2026-10-01):** Phase 1 is merged to `master` as `59549352` (PR #16). The adapter is in place and fully tested — `db()` selects the backend, qmark SQL is translated, rows emulate `sqlite3.Row` — but `init_db()` still refuses PostgreSQL until Phase 2 supplies the schema. Next up: Phase 2 (schema & constraints).
+> **Current state (2026-10-01):** Phase 1 is merged to `master` as `59549352` (PR #16). Phase 2 (schema & constraints) is implemented and in review as **draft PR #17** (`larry/postgres-phase2-schema`): PostgreSQL DDL with declarative `ON DELETE CASCADE` / `ON DELETE SET NULL` FKs, per-engine `init_db()` dispatch, and engine-conditional cascade deletions in the delete routes. Next up after merge: Phase 3 (query & route migration).
 
 ---
 

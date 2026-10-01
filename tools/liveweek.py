@@ -70,11 +70,11 @@ REQUEST_STATUSES = {
 CSRF_RE = re.compile(r'name="csrf-token" content="([^"]+)"')
 FLASH_RE = re.compile(r'class="flash">([^<]*)<')
 
-EXTRA_EMPLOYEES = [  # added to the 10 mock-employee roster -> 15 total
+EXTRA_EMPLOYEES = [  # added to the mock-employee roster
     ("noah", "front"), ("lena", "front"), ("omar", "front"),
     ("ruby", "back"), ("theo", "back"),
 ]
-TRANSIENT_HIRES = [("paul", "front"), ("quinn", "back")]  # added+deleted mid-run
+TRANSIENT_HIRES = [("paul", "front"), ("zack", "back")]  # added+deleted mid-run
 EXTRA_NAMES = {u for u, _ in EXTRA_EMPLOYEES} | {u for u, _ in TRANSIENT_HIRES}
 
 
@@ -1775,7 +1775,7 @@ DB `{run_dir / 'liveweek.db'}`
 ## What this run exercised
 
 - Warm-up: every employee ranked the full week; manager rebuilt the schedule.
-- Ambient phase ({cfg['duration']}s): 15 employee threads + 2 manager threads \
+- Ambient phase ({cfg['duration']}s): {cfg['employees']} employee threads + 2 manager threads \
 cycling the full behavior matrix (picks, swaps, invites, sick calls, vacations, \
 day-offs, switches, roster edits, triage, probes).
 - Collision drills: {', '.join(d[0] for d in DRILLS)}.
@@ -1906,13 +1906,15 @@ def main(argv=None) -> int:
         seed_world(appmod, db_path, rec)
         world = World(db_path, rec)
         world_week = appmod.monday_of(date.today()).isoformat()
+        import mock_seed
+        expected_count = len(mock_seed.PREFS) + len(EXTRA_EMPLOYEES)
         usernames = world.usernames()
-        if len(usernames) != 15:
-            print(f"harness seed error: expected 15 employees, got "
+        if len(usernames) != expected_count:
+            print(f"harness seed error: expected {expected_count} employees, got "
                   f"{len(usernames)}: {usernames}")
             return 1
         print(f"liveweek: server {base}, week {world_week}, "
-              f"15 employees: {', '.join(usernames)}")
+              f"{len(usernames)} employees: {', '.join(usernames)}")
 
         # --- sessions
         emp_sessions: list[WSession] = []
@@ -2003,7 +2005,7 @@ def main(argv=None) -> int:
 
         # --- final storm: everyone + both managers at once
         phase_name = "storm"
-        print("liveweek: final storm (all 15 picks + 2 rebuilds, concurrent)")
+        print(f"liveweek: final storm (all {len(usernames)} picks + 2 rebuilds, concurrent)")
         storm_sessions = [fresh_session(rec, base, world, s.actor, "storm")
                           for s in emp_sessions]
         storm_mgrs = [fresh_session(rec, base, world, s.actor, "storm")
@@ -2059,7 +2061,7 @@ def main(argv=None) -> int:
             take_snapshots(base, run_dir, mgr_sessions[0], emp_sessions[0], rec)
 
         issues = write_reports(rec, run_dir, args, {
-            "seed": seed, "duration": args.duration, "employees": 15,
+            "seed": seed, "duration": args.duration, "employees": len(usernames),
             "managers": 2, "base": base, "week": world_week,
             "strict": args.strict})
         n_crit = sum(1 for i in issues if i["severity"] == "CRITICAL")

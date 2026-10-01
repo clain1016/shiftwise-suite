@@ -1,5 +1,4 @@
 """A posted FOH shift must have a matching BOH shift, and vice versa."""
-import os
 import sys
 from pathlib import Path
 

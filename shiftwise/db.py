@@ -160,7 +160,8 @@ def init_db(seed_demo=False, mock_roster=False):
             if not password or len(password) < 12:
                 conn.close()
                 raise RuntimeError(
-                    "Set SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD (at least 12 characters) to replace the demo manager password"
+                    "Set SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD (at least 12 characters) "
+                    "to replace the demo manager password"
                 )
         conn.execute("UPDATE users SET password=? WHERE id=?",
                      (generate_password_hash(password), user[0]))
@@ -177,7 +178,8 @@ def init_db(seed_demo=False, mock_roster=False):
         if not seed_demo and (not bootstrap_password or len(bootstrap_password) < 12):
             conn.close()
             raise RuntimeError(
-                "Set SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD (at least 12 characters) to create the first manager"
+                "Set SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD (at least 12 characters) "
+                "to create the first manager"
             )
         if not seed_demo:
             conn.execute(
@@ -190,13 +192,20 @@ def init_db(seed_demo=False, mock_roster=False):
                 "INSERT INTO users (username, password, name, role, weekly_hours,"
                 " employment_type, hired_on, station) VALUES (?,?,?,?,?,?,?,?)",
                 [
-                    ("manager", generate_password_hash("manager"), "Store Manager", "manager", 40, "full_time", "2020-01-15", "front"),
-                    ("alex", generate_password_hash("alex"), "Alex Rivera", "employee", 30, "full_time", "2021-03-01", "front"),
-                    ("sam", generate_password_hash("sam"), "Sam Chen", "employee", 25, "part_time", "2023-06-10", "front"),
-                    ("taylor", generate_password_hash("taylor"), "Taylor Brooks", "employee", 20, "part_time", "2025-02-11", "front"),
-                    ("jordan", generate_password_hash("jordan"), "Jordan Diaz", "employee", 35, "part_time", "2024-11-20", "back"),
-                    ("casey", generate_password_hash("casey"), "Casey Boots", "employee", 35, "part_time", "2023-05-01", "back"),
-                    ("morgan", generate_password_hash("morgan"), "Morgan Vale", "employee", 40, "full_time", "2022-08-15", "back"),
+                    ("manager", generate_password_hash("manager"),
+                     "Store Manager", "manager", 40, "full_time", "2020-01-15", "front"),
+                    ("alex", generate_password_hash("alex"),
+                     "Alex Rivera", "employee", 30, "full_time", "2021-03-01", "front"),
+                    ("sam", generate_password_hash("sam"),
+                     "Sam Chen", "employee", 25, "part_time", "2023-06-10", "front"),
+                    ("taylor", generate_password_hash("taylor"),
+                     "Taylor Brooks", "employee", 20, "part_time", "2025-02-11", "front"),
+                    ("jordan", generate_password_hash("jordan"),
+                     "Jordan Diaz", "employee", 35, "part_time", "2024-11-20", "back"),
+                    ("casey", generate_password_hash("casey"),
+                     "Casey Boots", "employee", 35, "part_time", "2023-05-01", "back"),
+                    ("morgan", generate_password_hash("morgan"),
+                     "Morgan Vale", "employee", 40, "full_time", "2022-08-15", "back"),
                 ],
             )
             week = monday_of(date.today()).isoformat()

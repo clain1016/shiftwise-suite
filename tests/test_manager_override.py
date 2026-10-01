@@ -1,5 +1,5 @@
 from pathlib import Path
-import sys, os
+import sys
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -55,7 +55,7 @@ def test_manager_override():
         assert row and row["status"] == "manager_fixed", "override must create manager_fixed row"
         conn.close()
         # rebuild keeps it
-        n = appmod.run_scheduler(WEEK)
+        appmod.run_scheduler(WEEK)
         conn = appmod.db()
         row = conn.execute(
             "SELECT status FROM assignments WHERE shift_id=? AND user_id=?",

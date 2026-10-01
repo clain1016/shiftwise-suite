@@ -1,6 +1,5 @@
 """Mock smoke tests: FOH/BOH separation, shift coverage, and seed shape."""
 import sys
-import os
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent

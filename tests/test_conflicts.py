@@ -1,5 +1,5 @@
 from pathlib import Path
-import sys, os
+import sys
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -72,9 +72,6 @@ def test_conflicts():
         # fresh employee pick -> assignments rebuilt instantly
         conn2 = appmod.db()
         conn2.execute("DELETE FROM assignments")
-        n_alex_before = conn2.execute(
-            "SELECT COUNT(*) c FROM assignments a JOIN users u ON u.id=a.user_id "
-            "WHERE u.username='alex'").fetchone()["c"]
         conn2.commit()
         conn2.close()
         client.post("/logout")
@@ -104,9 +101,6 @@ def test_conflicts():
         client.post("/logout")
         client.post("/login", data={"username": "manager", "password": "manager"})
         conn2 = appmod.db()
-        sid_alex = conn2.execute(
-            "SELECT a.shift_id FROM assignments a JOIN users u ON u.id=a.user_id "
-            "WHERE u.username='alex' AND a.shift_id=?", (mon,)).fetchone()
         conn2.execute("UPDATE assignments SET status='confirmed' WHERE user_id="
                       "(SELECT id FROM users WHERE username='alex') AND shift_id=?", (mon,))
         conn2.commit()

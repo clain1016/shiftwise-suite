@@ -1,7 +1,6 @@
 from pathlib import Path
-import re
 from collections import defaultdict
-import sys, os
+import sys
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
@@ -43,7 +42,6 @@ def test_flow():
             client.post("/logout")
             login(user, user)
             r = client.get("/")
-            html = r.data.decode()
             conn = appmod.db()
             rows = conn.execute(
                 "SELECT id, day FROM shifts WHERE area="

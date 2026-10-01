@@ -8,6 +8,12 @@ import urllib.request
 from datetime import datetime
 from email.message import EmailMessage
 
+# Module-level handles for the delivery libraries. Tests patch these names
+# (e.g. `patch("shiftwise.notify._smtplib")`) instead of reaching through the
+# app facade (see docs/REFACTORING_BACKLOG.md R1).
+_smtplib = smtplib
+_urllib = urllib
+
 
 def notify(conn, user_id, kind, message, shift_id=None):
     """Insert an in-app notification for a user."""
@@ -20,11 +26,6 @@ def notify(conn, user_id, kind, message, shift_id=None):
 
 def send_schedule_link(channel, destination, employee_name, link):
     """Deliver a sign-in link through the configured SMTP or Twilio account."""
-    import sys
-    appmod = sys.modules.get("app")
-    _smtplib = getattr(appmod, "smtplib", smtplib) if appmod else smtplib
-    _urllib = getattr(appmod, "urllib", urllib) if appmod else urllib
-
     message_text = (f"Hi {employee_name}, use this link to sign in to ShiftWise "
                     f"and submit your schedule preferences: {link}")
     if channel == "email":

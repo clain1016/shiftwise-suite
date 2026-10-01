@@ -1,10 +1,10 @@
 # PostgreSQL Migration Plan & Development Handoff
 
-> Status: Phase 1 complete (merged 2026-10-01) · Phase 2 in review (draft PR #17) · Phases 3–5 pending · Target: Multi-worker concurrency, zero-lock contention, multi-store scalability · Last updated: 2026-10-01
+> Status: Phase 1 complete (merged 2026-10-01) · Phase 2 complete (merged 2026-10-01) · Phases 3–5 pending · Target: Multi-worker concurrency, zero-lock contention, multi-store scalability · Last updated: 2026-10-01
 
 This document serves as the complete, step-by-step engineering specification and forward handoff for migrating ShiftWise Suite from SQLite to PostgreSQL. Any future agent or engineer can pick up this roadmap and implement it phase-by-phase without ambiguity.
 
-> **Current state (2026-10-01):** Phase 1 is merged to `master` as `59549352` (PR #16). Phase 2 (schema & constraints) is implemented and in review as **draft PR #17** (`larry/postgres-phase2-schema`): PostgreSQL DDL with declarative `ON DELETE CASCADE` / `ON DELETE SET NULL` FKs, per-engine `init_db()` dispatch, and engine-conditional cascade deletions in the delete routes. Next up after merge: Phase 3 (query & route migration).
+> **Current state (2026-10-01):** Phase 1 is merged to `master` as `59549352` (PR #16). Phase 2 (schema & constraints) is merged to `master` as `28792e34` (PR #17): PostgreSQL DDL with declarative `ON DELETE CASCADE` / `ON DELETE SET NULL` FKs, per-engine `init_db()` dispatch, and engine-conditional cascade deletions in the delete routes. Next up: Phase 3 (query & route migration).
 
 ---
 
@@ -206,6 +206,8 @@ instead of leaking it. Full suite green on the merged head: 89 passed.
 - Schema initializes without errors on PostgreSQL.
 - Deleting a shift automatically drops associated picks, coverage preferences, and assignments.
 - Orphan row checks (`PRAGMA foreign_key_check` equivalent queries) find 0 violations.
+
+**Delivered 2026-10-01** (PR #17, merge `28792e34`): all tasks above, plus fixes from a live-PostgreSQL-16 review — `conn.commit()` after the DDL before the `mock_seed` handoff (the pool rolled back the uncommitted schema otherwise), `HH:MM` normalization of `TIME` columns in `mock_seed.py`, try/finally pool-lease return in `_init_db_postgres`, defensive `statement_timeout`/`lock_timeout` on the pool, a quote-aware `_split_ddl` lexer, and per-FK test pins. One deliberate deviation from the task text: manual cascade deletions were made engine-conditional rather than removed outright, because the SQLite schema declares no foreign keys — removing them would regress SQLite. Targeted tests green on the merged head (27 passed).
 
 ---
 

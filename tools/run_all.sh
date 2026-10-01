@@ -65,6 +65,9 @@ echo "=========================================================="
 echo " ShiftWise Suite: Test & Verification Suite (${MODE})"
 echo "=========================================================="
 
+echo "--> [0] Checking entrypoint executability (tools/check_entrypoints.py)..."
+"${PYTHON}" "${ROOT_DIR}/tools/check_entrypoints.py"
+
 echo ""
 if [[ "${MODE}" == "fast" ]]; then
     echo "--> FAST MODE: unit & integration suite only."

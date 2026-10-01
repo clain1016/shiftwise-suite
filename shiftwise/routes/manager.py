@@ -185,6 +185,151 @@ def requests():
     return render_template("requests.html", items=items)
 
 
+def _approve_day_off(conn, r, req_id):
+    """Mark a day-off request approved and notify the employee.
+
+    Returns None: the caller runs the common commit/scheduler tail.
+    """
+    conn.execute("UPDATE requests SET status='approved_ok' WHERE id=?", (req_id,))
+    notify(conn, r["user_id"], "assignment",
+           f"Your day-off request for {r['day']} was approved.")
+    return None
+
+
+def _approve_vacation(conn, r, req_id):
+    """Mark a vacation request approved after verifying coverage for the range.
+
+    Returns a redirect early when coverage gaps block approval; otherwise
+    returns None so the caller runs the common commit/scheduler tail.
+    """
+    start = date.fromisoformat(r["vacation_start"])
+    end = date.fromisoformat(r["vacation_end"])
+    gaps = []
+    for shift in conn.execute(
+            "SELECT * FROM shifts WHERE week_start>=? AND week_start<=?",
+            (monday_of(start).isoformat(), end.isoformat())):
+        shift_date = date.fromisoformat(shift["week_start"]) + timedelta(
+            days=DAYS.index(shift["day"]))
+        if not start <= shift_date <= end:
+            continue
+        staffed = conn.execute(
+            "SELECT COUNT(*) FROM assignments WHERE shift_id=? "
+            "AND status NOT IN ('sick','swap_requested')",
+            (shift["id"],)).fetchone()[0]
+        if staffed < shift["slots"]:
+            gaps.append(f"{shift['day']} {shift['start_time']}-{shift['end_time']}")
+    if gaps:
+        conn.close()
+        flash("Vacation can't be approved until coverage is arranged for: "
+              + ", ".join(gaps) + ".")
+        return redirect(url_for("manager.requests"))
+    conn.execute("UPDATE requests SET status='approved_ok' WHERE id=?", (req_id,))
+    notify(conn, r["user_id"], "assignment",
+           f"Your vacation request for {r['vacation_start']} to "
+           f"{r['vacation_end']} was approved.")
+    return None
+
+
+def _approve_swap(conn, r, req_id):
+    """Cover a swap request with an eligible coverer and rebuild the schedule."""
+    shift = conn.execute("SELECT * FROM shifts WHERE id=?", (r["shift_id"],)).fetchone()
+    pending = conn.execute(
+        "SELECT 1 FROM assignments WHERE shift_id=? AND user_id=? "
+        "AND status='swap_requested'", (r["shift_id"], r["user_id"])).fetchone()
+    cover_uid = (coverage_plan(conn, shift["week_start"], shift["id"], r["user_id"])
+                 if shift and pending else None)
+    if cover_uid is None:
+        conn.close()
+        flash("No eligible coverer is available for that swap.")
+        return redirect(url_for("requests"))
+    conn.execute("DELETE FROM assignments WHERE shift_id=? AND user_id=?",
+                 (shift["id"], r["user_id"]))
+    conn.execute("DELETE FROM picks WHERE shift_id=? AND user_id=?",
+                 (shift["id"], r["user_id"]))
+    conn.execute(
+        "INSERT INTO assignments (shift_id, user_id, status) VALUES (?,?,?)",
+        (shift["id"], cover_uid, "coverage_fixed"))
+    conn.execute("UPDATE requests SET status='approved_ok' WHERE id=?", (req_id,))
+    notify(conn, cover_uid, "assignment",
+           f"Coverage: you're now on {shift['day']} "
+           f"{shift['start_time']}-{shift['end_time']} (covering a swap).")
+    notify(conn, r["user_id"], "assignment",
+           f"Your swap for {shift['day']} {shift['start_time']}-{shift['end_time']} was covered.")
+    conn.commit()
+    conn.close()
+    run_scheduler(shift["week_start"])
+    flash("Swap covered.")
+    return redirect(url_for("requests"))
+
+
+def _approve_switch(conn, r, req_id):
+    """Move the employee to the target shift when it fits, then rebuild."""
+    if not (r["shift_id"] and r["target_shift_id"]):
+        # Preserve the historical fall-through: a switch request without both
+        # shift references takes the common tail below ("Request approved.").
+        return None
+    target = conn.execute("SELECT * FROM shifts WHERE id=?",
+                          (r["target_shift_id"],)).fetchone()
+    source = conn.execute(
+        "SELECT s.* FROM assignments a JOIN shifts s ON s.id=a.shift_id "
+        "WHERE a.user_id=? AND a.shift_id=? AND a.status "
+        "NOT IN ('sick','swap_requested')",
+        (r["user_id"], r["shift_id"])).fetchone()
+    if target and source and target["week_start"] == source["week_start"] \
+            and target["id"] != source["id"]:
+        staffed = conn.execute(
+            "SELECT COUNT(*) c FROM assignments WHERE shift_id=? "
+            "AND status NOT IN ('sick','swap_requested')",
+            (r["target_shift_id"],)).fetchone()["c"]
+        block_reason = assignment_block_reason(
+            conn, r["user_id"], target, exclude_shift_id=source["id"])
+        if staffed >= target["slots"] or block_reason:
+            conn.execute("UPDATE requests SET status='denied' WHERE id=?",
+                         (req_id,))
+            notify(conn, r["user_id"], "conflict",
+                   f"Switch declined: {target['day']} "
+                   f"{target['start_time']}-{target['end_time']} is unavailable.")
+        else:
+            conn.execute("DELETE FROM assignments WHERE shift_id=? AND user_id=?",
+                         (r["shift_id"], r["user_id"]))
+            conn.execute("DELETE FROM assignments WHERE shift_id=? AND user_id=?",
+                         (r["target_shift_id"], r["user_id"]))
+            conn.execute(
+                "INSERT OR IGNORE INTO assignments (shift_id, user_id) VALUES (?,?)",
+                (r["target_shift_id"], r["user_id"]))
+            conn.execute(
+                "UPDATE assignments SET status='switch_fixed' WHERE shift_id=? "
+                "AND user_id=?", (r["target_shift_id"], r["user_id"]))
+            conn.execute("DELETE FROM picks WHERE user_id=? AND shift_id=?",
+                         (r["user_id"], r["shift_id"]))
+            conn.execute("UPDATE requests SET status='approved_ok' WHERE id=?",
+                         (req_id,))
+            notify(conn, r["user_id"], "assignment",
+                   f"Switch approved: you're now on {target['day']} "
+                   f"{target['start_time']}-{target['end_time']}.")
+    else:
+        conn.execute("UPDATE requests SET status='denied' WHERE id=?", (req_id,))
+    conn.commit()
+    conn.close()
+    run_scheduler(source["week_start"] if source else monday_of(date.today()).isoformat())
+    flash("Switch request reviewed.")
+    return redirect(url_for("requests"))
+
+
+# Dispatch table for approve_request, keyed by request kind. Handlers take
+# (conn, r, req_id) and return a Flask response to finish the request early,
+# or None to fall through to the common commit/scheduler tail in
+# approve_request (day_off, vacation, switch requests lacking shift refs, and
+# any kind without a dedicated handler — behavior unchanged from the old
+# if/elif chain).
+_APPROVE_HANDLERS = {
+    "day_off": _approve_day_off,
+    "vacation": _approve_vacation,
+    "swap": _approve_swap,
+    "switch": _approve_switch,
+}
+
+
 @manager_bp.route("/manager/requests/<int:req_id>/approve", methods=["POST"])
 @login_required(role="manager")
 def approve_request(req_id):
@@ -202,112 +347,10 @@ def approve_request(req_id):
         flash("Request not found or already handled.")
         return redirect(url_for("manager.requests"))
     conn.execute("UPDATE requests SET reason=? WHERE id=?", (reason or None, req_id))
-    if r["kind"] == "day_off":
-        conn.execute("UPDATE requests SET status='approved_ok' WHERE id=?", (req_id,))
-        notify(conn, r["user_id"], "assignment",
-               f"Your day-off request for {r['day']} was approved.")
-    elif r["kind"] == "vacation":
-        start = date.fromisoformat(r["vacation_start"])
-        end = date.fromisoformat(r["vacation_end"])
-        gaps = []
-        for shift in conn.execute(
-                "SELECT * FROM shifts WHERE week_start>=? AND week_start<=?",
-                (monday_of(start).isoformat(), end.isoformat())):
-            shift_date = date.fromisoformat(shift["week_start"]) + timedelta(
-                days=DAYS.index(shift["day"]))
-            if not start <= shift_date <= end:
-                continue
-            staffed = conn.execute(
-                "SELECT COUNT(*) FROM assignments WHERE shift_id=? "
-                "AND status NOT IN ('sick','swap_requested')",
-                (shift["id"],)).fetchone()[0]
-            if staffed < shift["slots"]:
-                gaps.append(f"{shift['day']} {shift['start_time']}-{shift['end_time']}")
-        if gaps:
-            conn.close()
-            flash("Vacation can't be approved until coverage is arranged for: "
-                  + ", ".join(gaps) + ".")
-            return redirect(url_for("manager.requests"))
-        conn.execute("UPDATE requests SET status='approved_ok' WHERE id=?", (req_id,))
-        notify(conn, r["user_id"], "assignment",
-               f"Your vacation request for {r['vacation_start']} to "
-               f"{r['vacation_end']} was approved.")
-    elif r["kind"] == "swap":
-        shift = conn.execute("SELECT * FROM shifts WHERE id=?", (r["shift_id"],)).fetchone()
-        pending = conn.execute(
-            "SELECT 1 FROM assignments WHERE shift_id=? AND user_id=? "
-            "AND status='swap_requested'", (r["shift_id"], r["user_id"])).fetchone()
-        cover_uid = (coverage_plan(conn, shift["week_start"], shift["id"], r["user_id"])
-                     if shift and pending else None)
-        if cover_uid is None:
-            conn.close()
-            flash("No eligible coverer is available for that swap.")
-            return redirect(url_for("requests"))
-        conn.execute("DELETE FROM assignments WHERE shift_id=? AND user_id=?",
-                     (shift["id"], r["user_id"]))
-        conn.execute("DELETE FROM picks WHERE shift_id=? AND user_id=?",
-                     (shift["id"], r["user_id"]))
-        conn.execute(
-            "INSERT INTO assignments (shift_id, user_id, status) VALUES (?,?,?)",
-            (shift["id"], cover_uid, "coverage_fixed"))
-        conn.execute("UPDATE requests SET status='approved_ok' WHERE id=?", (req_id,))
-        notify(conn, cover_uid, "assignment",
-               f"Coverage: you're now on {shift['day']} "
-               f"{shift['start_time']}-{shift['end_time']} (covering a swap).")
-        notify(conn, r["user_id"], "assignment",
-               f"Your swap for {shift['day']} {shift['start_time']}-{shift['end_time']} was covered.")
-        conn.commit()
-        conn.close()
-        run_scheduler(shift["week_start"])
-        flash("Swap covered.")
-        return redirect(url_for("requests"))
-    elif r["kind"] == "switch" and r["shift_id"] and r["target_shift_id"]:
-        target = conn.execute("SELECT * FROM shifts WHERE id=?",
-                              (r["target_shift_id"],)).fetchone()
-        source = conn.execute(
-            "SELECT s.* FROM assignments a JOIN shifts s ON s.id=a.shift_id "
-            "WHERE a.user_id=? AND a.shift_id=? AND a.status "
-            "NOT IN ('sick','swap_requested')",
-            (r["user_id"], r["shift_id"])).fetchone()
-        if target and source and target["week_start"] == source["week_start"] \
-                and target["id"] != source["id"]:
-            staffed = conn.execute(
-                "SELECT COUNT(*) c FROM assignments WHERE shift_id=? "
-                "AND status NOT IN ('sick','swap_requested')",
-                (r["target_shift_id"],)).fetchone()["c"]
-            block_reason = assignment_block_reason(
-                conn, r["user_id"], target, exclude_shift_id=source["id"])
-            if staffed >= target["slots"] or block_reason:
-                conn.execute("UPDATE requests SET status='denied' WHERE id=?",
-                             (req_id,))
-                notify(conn, r["user_id"], "conflict",
-                       f"Switch declined: {target['day']} "
-                       f"{target['start_time']}-{target['end_time']} is unavailable.")
-            else:
-                conn.execute("DELETE FROM assignments WHERE shift_id=? AND user_id=?",
-                             (r["shift_id"], r["user_id"]))
-                conn.execute("DELETE FROM assignments WHERE shift_id=? AND user_id=?",
-                             (r["target_shift_id"], r["user_id"]))
-                conn.execute(
-                    "INSERT OR IGNORE INTO assignments (shift_id, user_id) VALUES (?,?)",
-                    (r["target_shift_id"], r["user_id"]))
-                conn.execute(
-                    "UPDATE assignments SET status='switch_fixed' WHERE shift_id=? "
-                    "AND user_id=?", (r["target_shift_id"], r["user_id"]))
-                conn.execute("DELETE FROM picks WHERE user_id=? AND shift_id=?",
-                             (r["user_id"], r["shift_id"]))
-                conn.execute("UPDATE requests SET status='approved_ok' WHERE id=?",
-                             (req_id,))
-                notify(conn, r["user_id"], "assignment",
-                       f"Switch approved: you're now on {target['day']} "
-                       f"{target['start_time']}-{target['end_time']}.")
-        else:
-            conn.execute("UPDATE requests SET status='denied' WHERE id=?", (req_id,))
-        conn.commit()
-        conn.close()
-        run_scheduler(source["week_start"] if source else monday_of(date.today()).isoformat())
-        flash("Switch request reviewed.")
-        return redirect(url_for("requests"))
+    handler = _APPROVE_HANDLERS.get(r["kind"])
+    response = handler(conn, r, req_id) if handler is not None else None
+    if response is not None:
+        return response
     conn.commit()
     conn.close()
     if r["kind"] == "day_off":

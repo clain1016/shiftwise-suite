@@ -1,6 +1,6 @@
 # Refactoring Backlog
 
-> Status: all six items implemented (R1 merged; R3–R6 in review as drafts) · Last reviewed: 2026-10-01
+> Status: all six items implemented (R1–R3 merged; R4–R6 in review as drafts) · Last reviewed: 2026-10-01
 
 Bigger, judgment-call refactors left out of the mechanical cleanup in PR #13.
 Each item is specified so a future agent (or human) can pick it up and implement
@@ -69,6 +69,8 @@ and the gauntlet / scenario_demo printed summaries are byte-identical
 before/after.
 
 ## R3 — `approve_request` dispatch dict
+
+**Status:** implemented in [PR #26](https://github.com/clain1016/shiftwise-suite/pull/26).
 
 **Problem.** `shiftwise/routes/manager.py:186` is ~127 lines of `if/elif` over the
 request kinds. Every new request type makes it longer.

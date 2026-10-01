@@ -123,12 +123,14 @@ to a beginner.
 
 **Status:** implemented in [PR #24](https://github.com/clain1016/shiftwise-suite/pull/24).
 
-`mock_seed.seed(appmod, force=False)` refuses to wipe a non-empty database
+**Problem (resolved).** `mock_seed.seed()` used to refuse wiping a non-empty DB without
+`force=True`; the version before this change wiped unconditionally. All present callers are
+test/tooling/demo paths, but the rail existed for a reason.
+
+**Resolution.** `mock_seed.seed(appmod, force=False)` refuses to wipe a non-empty database
 unless `force=True` (raises `RuntimeError`). The connection is closed before
 raising to avoid leaking pool leases on PostgreSQL. All callers intending to
 wipe now pass `force=True`.
-`force=True`; the current version wipes unconditionally. All present callers are
-test/tooling/demo paths, but the rail existed for a reason.
 
 **Approach.** Restore the guard (raise unless the users table is empty or
 `force=True`), and update every call site to pass `force=True` where wiping is

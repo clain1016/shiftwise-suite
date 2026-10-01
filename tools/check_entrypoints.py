@@ -20,6 +20,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENTRYPOINTS = (
     "docker-entrypoint.sh",
     "shiftwise-mock/sync.sh",
+    "tools/clean_artifacts.sh",
     "tools/run_all.sh",
 )
 EXEC_MODE = "100755"

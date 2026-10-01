@@ -50,6 +50,15 @@ if ! [[ "${LIVEWEEK_SECONDS}" =~ ^[0-9]+$ ]]; then
     exit 2
 fi
 
+CLEAN="${ROOT_DIR}/tools/clean_artifacts.sh"
+
+# Start from a clean artifact baseline, and clean again on exit -- including
+# aborted runs -- so a killed gate cannot leave test databases or caches behind.
+# tools/liveweek-artifacts/ is preserved: AGENTS.md section 4 keeps those
+# findings for fixing agents.
+"${CLEAN}" --quiet
+trap '"${CLEAN}" --quiet || true' EXIT
+
 PYTHON="${ROOT_DIR}/.venv/bin/python"
 PYTEST="${ROOT_DIR}/.venv/bin/pytest"
 

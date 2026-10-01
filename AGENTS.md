@@ -19,6 +19,7 @@
   - Always clean up temporary databases and caches before committing, creating PRs, or proceeding to deployment.
   - Simulation tools like `tools/liveweek.py` and `tools/scenario_demo.py` write local databases (`tools/*.db`); remove these before pushing or checking status.
   - `git status` must be completely clean (`nothing to commit, working tree clean`) with no untracked artifacts.
+- The canonical cleanup is `./tools/clean_artifacts.sh` (databases, `__pycache__`, `*.pyc`, `.pytest_cache`); add `--liveweek-artifacts` to also drop the gauntlet findings kept for fixing agents. `tools/run_all.sh` runs it on entry and on exit, so a normal or aborted gate leaves the tree clean; a `SIGKILL`ed run still needs the manual command.
 
 ## 4. Verification Standard
 
@@ -38,7 +39,7 @@
   - `docker compose config` validates.
 - `./tools/run_all.sh --fast` runs the pytest suite only (for the inner development loop) and prints the full-gate reminder.
 - Dev extras (`requirements-dev.txt`: `pytest-timeout`, `pglast`) are required for a fully green suite: without `pglast` the PostgreSQL DDL parser test skips, and `pytest.ini` caps each test at 180 s so a lock wait or dialect error cannot hang a run.
-- `tools/check_entrypoints.py` (run as step `[0]` of `tools/run_all.sh`) asserts the three tracked shell entrypoints (`tools/run_all.sh`, `docker-entrypoint.sh`, `shiftwise-mock/sync.sh`) keep mode `100755` via `git ls-files -s`. It catches the regression class PR #18 shipped: a dropped executable bit silently breaks the documented `./tools/run_all.sh` while every test still passes.
+- `tools/check_entrypoints.py` (run as step `[0]` of `tools/run_all.sh`) asserts the tracked shell entrypoints (`tools/run_all.sh`, `tools/clean_artifacts.sh`, `docker-entrypoint.sh`, `shiftwise-mock/sync.sh`) keep mode `100755` via `git ls-files -s`. It catches the regression class PR #18 shipped: a dropped executable bit silently breaks the documented `./tools/run_all.sh` while every test still passes.
 - `.github/workflows/ci.yml` runs only that guard on pushes to `master` and on pull requests (no pytest, docker, or venv). It is not a required status check — blocking merges needs branch protection, which needs repo admin.
 
 ## 5. Simulation Harness & Mock Roster Coupling

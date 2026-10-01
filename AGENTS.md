@@ -27,17 +27,20 @@
 | When | Command | Cost |
 | --- | --- | --- |
 | While writing code | `pytest tests/<file>::<test>` (targeted) | seconds |
-| Wider check while writing code | `./tools/run_all.sh --fast` (pytest suite only) | ~3 min |
-| Before opening a PR or merging | `./tools/run_all.sh` (full gate) | ~6 min |
+| Wider check while writing code | `./tools/run_all.sh --fast` (entrypoint guard + pytest suite) | ~3 min |
+| Before merging runtime changes | `./tools/run_all.sh` (full gate) | ~6 min |
 | Full gate without the load check | `./tools/run_all.sh --no-liveweek` | ~5 min |
 
-- Before marking any phase complete, opening a PR, or deploying, the full gate (`./tools/run_all.sh`) must pass:
+- **Runtime blast radius** (`shiftwise/`, `app.py`, `tests/`, `mock_seed.py`, DB adapters/schema, `requirements*.txt`, `Dockerfile`, `docker-compose.yml`, `tools/gauntlet.py`, `tools/scenario_demo.py`, `tools/liveweek.py`) — the full gate (`./tools/run_all.sh`) must pass before merging. It must show:
   - the full collected pytest unit & integration suite passes 100% green;
   - the 11-phase stress gauntlet (`tools/gauntlet.py`) and `tools/scenario_demo.py` complete without error;
-  - the live-week concurrency gauntlet (`tools/liveweek.py`) completes without harness error; its findings are recorded as artifacts in `tools/liveweek-artifacts/` (gitignored) for fixing agents — they are reports, not suite failures (`--strict` enforces them in CI). Duration is configurable via `--liveweek-seconds N` or `SHIFTWISE_LIVEWEEK_SECONDS`;
+  - the live-week concurrency gauntlet (`tools/liveweek.py`) completes without harness error; its findings are recorded as artifacts in `tools/liveweek-artifacts/` (gitignored) for fixing agents — they are reports, not suite failures (`--strict` makes the harness itself exit non-zero on CRITICAL/HIGH findings). Duration is configurable via `--liveweek-seconds N` or `SHIFTWISE_LIVEWEEK_SECONDS`;
   - `docker compose config` validates.
-- `./tools/run_all.sh --fast` runs the pytest suite only (for the inner development loop) and prints the full-gate reminder.
+- **Tooling / CI / docs only** (`.github/`, `*.md`, `tools/` scripts other than the three harnesses) — the entrypoint guard (`tools/check_entrypoints.py`) plus only the checks the change actually exercises. The PR's CI run executes the pytest suite in parallel, so a docs or CI edit does not need a ~6 min local gate.
+- `./tools/run_all.sh --fast` runs the entrypoint guard and the pytest suite only (for the inner development loop) and prints the full-gate reminder.
 - Dev extras (`requirements-dev.txt`: `pytest-timeout`, `pglast`) are required for a fully green suite: without `pglast` the PostgreSQL DDL parser test skips, and `pytest.ini` caps each test at 180 s so a lock wait or dialect error cannot hang a run.
+- `tools/check_entrypoints.py` runs as step `[0]` of `tools/run_all.sh` (both tiers): every tracked `*.sh` must be mode `100755` with a `#!` shebang, and every `./<path>.sh` referenced in tracked markdown must exist and be executable. This guards the regression class PR #18 shipped — a dropped executable bit silently breaks the documented `./tools/run_all.sh` while every test still passes.
+- `.github/workflows/ci.yml` runs that guard plus the `--fast` pytest tier on every push to `master` and every pull request; the heavy tiers stay in the local full gate so PR feedback stays lean. Turning the workflow into a *required* status check needs a repository admin (branch protection).
 
 ## 5. Simulation Harness & Mock Roster Coupling
 - **Dynamic Staffing Expectations:**

@@ -97,15 +97,8 @@ def send_employee_schedule_link(user_id):
         )
         return redirect(url_for("roster.roster"))
     try:
-        import sys
-        appmod = sys.modules.get("app")
-        sender = (
-            getattr(appmod, "send_schedule_link", send_schedule_link)
-            if appmod
-            else send_schedule_link
-        )
-        sender(channel, destination, employee["name"],
-               public_url + url_for("auth.login"))
+        send_schedule_link(channel, destination, employee["name"],
+                           public_url + url_for("auth.login"))
     except (ValueError, OSError, smtplib.SMTPException, urllib.error.URLError) as exc:
         flash(str(exc) or "Message could not be sent. Check the delivery settings.")
     else:

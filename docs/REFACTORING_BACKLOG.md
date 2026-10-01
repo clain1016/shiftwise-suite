@@ -22,6 +22,8 @@ it independently. Work them **one item per PR**, branched from current `master`.
 
 ## R1 — Untangle the hidden test seam (`notify.py` / `app.py`)
 
+**Status:** in review — draft PR #N (`larry/backlog-r1-test-seam`), opened 2026-10-01.
+
 **Problem.** `shiftwise/notify.py` (lines ~23-26) reaches into `sys.modules["app"]`
 to grab `smtplib`/`urllib`, and `tests/test_employee_schedule_links.py` patches
 `appmod.smtplib.SMTP`. The imports pyflakes flags in `app.py` (`smtplib`,

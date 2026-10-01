@@ -16,16 +16,6 @@ import urllib
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from flask import (
-    Flask,
-    abort,
-    flash,
-    redirect,
-    render_template,
-    request,
-    session,
-    url_for,
-)
 from werkzeug.security import check_password_hash, generate_password_hash
 
 _db_mod = importlib.import_module("shiftwise.db")
@@ -107,6 +97,10 @@ __all__ = [
     "date",
     "datetime",
     "timedelta",
+    # Re-exported for the monkeypatch facade contract (AGENTS.md §2):
+    # legacy tests may patch app.smtplib.SMTP / app.urllib.request.urlopen.
+    "smtplib",
+    "urllib",
 ]
 
 

@@ -140,6 +140,8 @@ read `issues/` top-down and cross-reference the event logs.
 .venv/bin/python tools/liveweek.py --strict         # CI mode: exit 2 on CRITICAL/HIGH findings
 ```
 
+See [`docs/KNOWN_ISSUES.md`](KNOWN_ISSUES.md) for the active concurrency and data-integrity backlog compiled from liveweek runs, prioritized from CRITICAL to MEDIUM with root-cause analyses and reproduction seeds.
+
 
 ---
 

@@ -33,6 +33,7 @@ from shiftwise.auth import login_required
 from shiftwise.db import (
     SCHEMA,
     db,
+    execute_sql,
     init_db,
     monday_of,
 )
@@ -77,6 +78,7 @@ __all__ = [
     "create_app",
     "app",
     "db",
+    "execute_sql",
     "init_db",
     "monday_of",
     "DB_PATH",

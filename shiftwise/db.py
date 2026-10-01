@@ -176,14 +176,18 @@ def _qmark_to_psycopg(query):
 
 
 class _PostgresRow(dict):
-    """A dict row with the positional indexing provided by sqlite3.Row."""
+    """A dict row with positional indexing and value iteration matching sqlite3.Row."""
 
     def __init__(self, values, description):
         self._values = tuple(values)
         names = tuple(
-            getattr(column, "name", column[0]) for column in description
+            column.name if hasattr(column, "name") else column[0]
+            for column in description
         )
         super().__init__(zip(names, self._values))
+
+    def __iter__(self):
+        return iter(self._values)
 
     def __getitem__(self, key):
         if isinstance(key, (int, slice)):
@@ -230,6 +234,13 @@ class _PostgresCursor:
                 return
             yield row
 
+    def __enter__(self):
+        self._cursor.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return self._cursor.__exit__(exc_type, exc_val, exc_tb)
+
     def __getattr__(self, name):
         return getattr(self._cursor, name)
 
@@ -242,7 +253,12 @@ class _PostgresConnection:
         self._connection = connection
         self._closed = False
 
+    def _check_closed(self):
+        if self._closed or self._connection is None:
+            raise RuntimeError("Cannot operate on a closed database connection")
+
     def cursor(self, *args, **kwargs):
+        self._check_closed()
         return _PostgresCursor(self._connection.cursor(*args, **kwargs))
 
     def execute(self, query, params=()):
@@ -252,17 +268,32 @@ class _PostgresConnection:
         return self.cursor().executemany(query, params_seq)
 
     def commit(self):
+        self._check_closed()
         return self._connection.commit()
 
     def rollback(self):
+        self._check_closed()
         return self._connection.rollback()
 
     def close(self):
         if not self._closed:
             self._closed = True
-            self._pool.putconn(self._connection)
+            conn = self._connection
+            self._connection = None
+            if conn is not None:
+                self._pool.putconn(conn)
+
+    def __enter__(self):
+        self._check_closed()
+        self._connection.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._check_closed()
+        return self._connection.__exit__(exc_type, exc_val, exc_tb)
 
     def __getattr__(self, name):
+        self._check_closed()
         return getattr(self._connection, name)
 
 

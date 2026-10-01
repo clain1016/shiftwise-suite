@@ -27,7 +27,7 @@ import mock_seed
 from datetime import date
 
 app.init_db(seed_demo=True)
-employees, days, picks = mock_seed.seed(app)
+employees, days, picks = mock_seed.seed(app, force=True)
 week = mock_seed.monday_of(date.today()).isoformat()
 app.run_scheduler(week)
 print(f"mock database seeded: {employees} employees (FOH+BOH), "

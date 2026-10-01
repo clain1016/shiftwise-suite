@@ -23,7 +23,7 @@ class CsrfTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="shiftwise-csrf-")
         appmod.DB_PATH = Path(self.temporary.name) / "scheduler.db"
         appmod.init_db(seed_demo=True)
-        mock_seed.seed(appmod)
+        mock_seed.seed(appmod, force=True)
         appmod.run_scheduler(appmod.monday_of(appmod.date.today()).isoformat())
         appmod.app.test_client_class = CsrfAwareTestClient
         # `self.client` behaves like the tools/tests clients; `self.plain` is

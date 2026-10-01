@@ -67,13 +67,24 @@ def monday_of(d):
     return d - timedelta(days=d.weekday())
 
 
-def seed(appmod):
+def seed(appmod, force=False):
     """Wipe and reseed appmod's DB with the mock roster + full demo week.
 
     Every employee also gets pre-seeded picks (full 21-shift ranking) so the
     site is immediately testable without manual input.
+
+    Refuses to wipe a non-empty database unless force=True, so an accidental
+    call can never destroy real data.
     """
     conn = appmod.db()
+    if not force:
+        existing = conn.execute("SELECT 1 FROM users LIMIT 1").fetchone()
+        if existing is not None:
+            conn.close()
+            raise RuntimeError(
+                "mock_seed.seed() refuses to wipe a non-empty database "
+                "without force=True"
+            )
     for table in ("picks", "coverage_preferences", "assignments", "notifications",
                   "requests", "login_attempts", "shifts", "users"):
         conn.execute(f"DELETE FROM {table}")

@@ -11,6 +11,7 @@ if str(TESTS_DIR) not in sys.path:
 
 import app as appmod
 import mock_seed
+import pytest
 from test_support import isolate_database
 from datetime import date
 
@@ -21,7 +22,7 @@ def test_mock_smoke():
     if DB.exists():
         DB.unlink()
     appmod.init_db(seed_demo=True)
-    mock_seed.seed(appmod)
+    mock_seed.seed(appmod, force=True)
 
     week = appmod.monday_of(__import__("datetime").date.today()).isoformat()
     conn = appmod.db()
@@ -71,12 +72,13 @@ def test_mock_smoke():
     assert not cross, f"cross-house leak: {[r['username'] for r in cross]}"
     assert on_front == ["maria"], f"FOH Mon opening got {on_front}"
     assert on_back == ["morgan"], f"BOH Mon opening got {on_back}"
+    _test_db.cleanup()
 
 
 def test_seeded_demo_has_staggered_shifts_and_peak_staffing():
     _test_db = isolate_database(appmod)
     appmod.init_db(seed_demo=True)
-    mock_seed.seed(appmod)
+    mock_seed.seed(appmod, force=True)
     conn = appmod.db()
     week = appmod.monday_of(date.today()).isoformat()
     expected_windows = [("07:00", "15:00"), ("11:00", "19:00"), ("15:00", "23:00")]
@@ -119,7 +121,7 @@ def test_seeded_demo_has_staggered_shifts_and_peak_staffing():
 def test_seeded_week_fills_peak_and_nonpeak_shifts_without_rule_violations():
     _test_db = isolate_database(appmod)
     appmod.init_db(seed_demo=True)
-    mock_seed.seed(appmod)
+    mock_seed.seed(appmod, force=True)
     week = appmod.monday_of(date.today()).isoformat()
     appmod.run_scheduler(week)
     conn = appmod.db()
@@ -164,6 +166,39 @@ def test_seeded_week_fills_peak_and_nonpeak_shifts_without_rule_violations():
     assert peak_slots > nonpeak_slots
     conn.close()
     _test_db.cleanup()
+
+
+def test_seed_refuses_to_wipe_nonempty_db_without_force():
+    """R6 guard: seed() must raise on a non-empty DB unless force=True."""
+    _test_db = isolate_database(appmod)
+    appmod.init_db(seed_demo=True)  # leaves a non-empty users table
+
+    with pytest.raises(RuntimeError, match="force=True"):
+        mock_seed.seed(appmod)
+
+    # The data is untouched by the refused call...
+    conn = appmod.db()
+    assert conn.execute("SELECT COUNT(*) c FROM users").fetchone()["c"] == 7
+    conn.close()
+
+    # ...and an explicit force=True still wipes and reseeds.
+    n, d, p = mock_seed.seed(appmod, force=True)
+    assert (n, d, p) == (14, 7, 14 * 21)
+    _test_db.cleanup()
+
+
+def test_seed_on_empty_db_needs_no_force():
+    """The guard passes silently when the users table is empty."""
+    _test_db = isolate_database(appmod)
+    appmod.init_db(seed_demo=True)
+    conn = appmod.db()
+    conn.execute("DELETE FROM users")
+    conn.commit()
+    conn.close()
+    n, d, p = mock_seed.seed(appmod)
+    assert (n, d, p) == (14, 7, 14 * 21)
+    _test_db.cleanup()
+
 
 if __name__ == "__main__":
     test_mock_smoke()

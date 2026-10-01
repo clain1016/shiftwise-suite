@@ -1,6 +1,6 @@
 # Refactoring Backlog
 
-> Status: all six items implemented (R1–R3 merged; R4–R6 in review as drafts) · Last reviewed: 2026-10-01
+> Status: all six items implemented (R1–R3, R6 merged; R4–R5 in review as drafts) · Last reviewed: 2026-10-01
 
 Bigger, judgment-call refactors left out of the mechanical cleanup in PR #13.
 Each item is specified so a future agent (or human) can pick it up and implement
@@ -121,9 +121,16 @@ to a beginner.
 
 ## R6 — Restore the `mock_seed` force guard
 
-**Problem.** `mock_seed.seed()` used to refuse wiping a non-empty DB without
-`force=True`; the current version wipes unconditionally. All present callers are
+**Status:** implemented in [PR #24](https://github.com/clain1016/shiftwise-suite/pull/24).
+
+**Problem (resolved).** `mock_seed.seed()` used to refuse wiping a non-empty DB without
+`force=True`; the version before this change wiped unconditionally. All present callers are
 test/tooling/demo paths, but the rail existed for a reason.
+
+**Resolution.** `mock_seed.seed(appmod, force=False)` refuses to wipe a non-empty database
+unless `force=True` (raises `RuntimeError`). The connection is closed before
+raising to avoid leaking pool leases on PostgreSQL. All callers intending to
+wipe now pass `force=True`.
 
 **Approach.** Restore the guard (raise unless the users table is empty or
 `force=True`), and update every call site to pass `force=True` where wiping is

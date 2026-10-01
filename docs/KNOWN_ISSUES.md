@@ -45,13 +45,18 @@ within `busy_timeout` (15s) raise `OperationalError`. No route has a retry or
 graceful-degradation path.
 
 **Fix approach.**
-1. Wrap write-path calls in a retry loop (1–3 retries with short backoff) for
-   `OperationalError("database is locked")`.
-2. Move the `UPDATE notifications SET read=1` in the dashboard GET to a
-   deferred / non-blocking path (it's a write inside a read-heavy page load).
-3. Consider connection pooling or WAL mode optimizations in `shiftwise/db.py`.
-4. Long-term: migrate to PostgreSQL for production concurrency (the Docker
-   Compose config already provisions a pg container).
+1. **Debounce / Decouple Scheduler Rebuilds**: Move `run_scheduler()` out of the
+   inline `POST /pick` request path. Submitting picks is an ultra-fast (<5ms)
+   `DELETE` + batch `INSERT`. Coalesce rebuilds via a debounced background worker
+   or queue so 19 concurrent submissions trigger 1 schedule rebuild instead of 19
+   serialized runs.
+2. **Eliminate Write-on-Read**: Move `UPDATE notifications SET read=1` in `GET /`
+   to a deferred/asynchronous endpoint or user dismissal action so page loads
+   remain purely read-only and never compete for write locks.
+3. **Application Retry Loop**: Wrap write transactions with exponential backoff
+   and jitter (1–3 retries, 50ms–300ms) for transient `OperationalError: database is locked`.
+4. **Architectural Review**: See the dedicated [Architectural Evaluation: SQLite Optimization vs. PostgreSQL Migration](#architectural-evaluation-sqlite-optimization-vs-postgresql-migration)
+   section below for a full trade-off analysis and implementation blueprint.
 
 **Code locations:** `shiftwise/db.py`, `shiftwise/scheduler/engine.py:57`,
 `shiftwise/routes/employee.py:151,217,236`, `shiftwise/auth.py:97`,
@@ -259,6 +264,112 @@ IDs per area, and build the rank form using all of them (like `day_shift_ids`
 in `scenario_demo.py`).
 
 **Code location:** `tools/scenario_random.py:94-97`
+
+## Architectural Evaluation: SQLite Optimization vs. PostgreSQL Migration
+
+A key question arising from the chaos and load testing is whether SQLite itself is inadequate for ShiftWise's concurrent workload and whether the application must migrate to PostgreSQL (or another client-server RDBMS).
+
+### 1. Is PostgreSQL Migration Strictly Necessary?
+
+**Short answer:** Not for the current target deployment scale (single-store hospitality/service venue with 15–50 staff), but it **will be** necessary if the platform transitions to a multi-tenant cloud SaaS or multi-node clustered deployment.
+
+#### Why SQLite Failed in the Load Tests
+The test harness failures (`sqlite3.OperationalError: database is locked` causing 500s and latency spikes up to 21s) were **not** caused by SQLite's inability to store or retrieve 50 employees' shifts. In WAL mode, SQLite easily handles thousands of read queries per second alongside concurrent writes.
+
+The failure was caused by an **application architectural antipattern**:
+1. **Synchronous Full-Week Scheduler Inline with HTTP Requests**: Every `POST /pick` (as well as `/swap`, `/request/vacation`, etc.) runs `run_scheduler(week)` *inline* before responding to the user.
+2. **Coarse-Grained Database Locks**: `run_scheduler()` calls `BEGIN IMMEDIATE`, locking the entire database for up to 1.5 seconds while performing iterative rounds of priority matching, allocations, and notification writes.
+3. **Queue Overflow**: When 19 employees submit picks within a narrow window (e.g., during the pick storm drill), 19 exclusive transactions queue behind each other. The cumulative wait time (19 × ~1s = ~19s) exceeds SQLite's `busy_timeout` (15s), causing unhandled exceptions.
+4. **Write-on-Read Contention**: `GET /` (dashboard) executes `UPDATE notifications SET read=1`, requiring an exclusive write lock on every page load and competing directly with scheduler runs.
+
+**Critical Insight:** Migrating to PostgreSQL without altering this design would **not** solve the problem: 19 concurrent transactions attempting to recompute and write the entire week's schedule simultaneously would trigger PostgreSQL serialization failures (`could not serialize access due to concurrent update`, SQLSTATE 40001), transaction deadlocks, or connection pool exhaustion. The scheduling engine execution model must be optimized regardless of the database engine.
+
+---
+
+### 2. Comparison Matrix: SQLite Optimization vs. PostgreSQL Migration
+
+| Dimension | Option A: Optimize SQLite Architecture | Option B: Migrate to PostgreSQL |
+|---|---|---|
+| **Primary Remediation** | Decouple scheduler from HTTP request (debounce/queue), remove write-on-read in `GET /`, add retry decorator with jitter. | Move to row-level locking RDBMS; rewrite DB abstraction layer; enforce foreign key cascades. |
+| **Concurrency Ceiling** | ~50 concurrent users per store; single-writer bottleneck remains for overlapping writes, but write transactions become ultra-fast (<5ms). | Thousands of concurrent users across multiple stores; true multi-writer concurrency via MVCC and row-level locks. |
+| **Operational Complexity** | **Zero**: Single file on disk (`scheduler.db`), no daemon, zero external dependencies, trivial backups (file copy/WAL snapshot). | **Medium**: Requires running, configuring, securing, and backing up a PostgreSQL container/service; managing connection strings, pg_hba, and volumes. |
+| **Implementation Effort** | **Low (1–2 PRs)**: Change `/pick` to debounce scheduler runs; remove dashboard write; add a 3-line `@retry_on_locked` decorator. | **High (3–5 PRs)**: Refactor all raw SQL syntax (`?` → `%s`), replace `sqlite3.Row` cursors, configure connection pooling (`psycopg_pool`), adapt schema migrations, update test harnesses. |
+| **Test Suite Velocity** | **Fast**: Pytest suite runs in-process with ephemeral SQLite databases in seconds without external network/container dependencies. | **Slower**: Test suites require spinning up test databases, managing schema fixtures, or running dedicated CI service containers. |
+| **Multi-Node Deployment** | **Unsupported**: SQLite cannot be shared across multiple Docker containers/servers over network filesystems (NFS/CIFS lock hazards). | **Native**: Any number of web workers across multiple nodes can connect to the shared database instance. |
+| **Data Integrity Rails** | Pragmas (`PRAGMA foreign_keys=ON`) required; manual cascade deletes currently implemented. | Native `FOREIGN KEY ... ON DELETE CASCADE` eliminates orphan rows (H1) permanently at the database engine level. |
+
+---
+
+### 3. How to Implement PostgreSQL Migration (Blueprint)
+
+If the roadmap demands PostgreSQL (e.g. for multi-tenant cloud hosting or multi-node clustering), the migration should be executed in disciplined phases:
+
+#### Step 1: Database Abstraction & Driver Layer
+- Replace raw `sqlite3` calls in `shiftwise/db.py` with an abstraction layer (or SQLAlchemy Core / `psycopg3`).
+- Create a unified query wrapper supporting configurable dialect drivers:
+  ```python
+  # Abstracted connection and parameter mapping
+  DB_ENGINE = os.environ.get("SHIFTWISE_DB_ENGINE", "sqlite")  # "sqlite" | "postgres"
+  ```
+- Standardize parameter placeholders: SQLite uses `?`, whereas psycopg/PostgreSQL uses `%s` or `$1`. A query adapter function or migration to a unified syntax is required across all route files.
+
+#### Step 2: Schema Translation & Constraints
+- Replace SQLite-specific types:
+  - `INTEGER PRIMARY KEY` → `BIGSERIAL PRIMARY KEY` or `GENERATED ALWAYS AS IDENTITY`
+  - `TEXT` dates → `DATE` / `TIMESTAMP WITH TIME ZONE`
+  - `INTEGER` flags → `BOOLEAN`
+- Enforce relational constraints directly in DDL:
+  ```sql
+  ALTER TABLE picks ADD CONSTRAINT fk_picks_shift
+    FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE;
+  ALTER TABLE picks ADD CONSTRAINT fk_picks_user
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+  ALTER TABLE assignments ADD CONSTRAINT fk_assignments_shift
+    FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE;
+  ```
+- Implement `CHECK (slots >= 1)` and use database-level uniqueness constraints for active assignments to resolve C2.
+
+#### Step 3: Granular Locking for the Scheduler
+- Replace `BEGIN IMMEDIATE` with PostgreSQL advisory locks:
+  ```sql
+  -- Advisory lock scoped to the specific week being scheduled:
+  SELECT pg_try_advisory_xact_lock(hashtext('scheduler:' || :week_start));
+  ```
+  This allows scheduling for Week A and Week B to run concurrently without blocking each other, while cleanly discarding or queuing redundant concurrent triggers for the same week.
+
+#### Step 4: Infrastructure & Container Orchestration
+- Update `docker-compose.yml`:
+  ```yaml
+  services:
+    postgres:
+      image: postgres:16-alpine
+      restart: unless-stopped
+      environment:
+        POSTGRES_DB: shiftwise
+        POSTGRES_USER: shiftwise
+        POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+      volumes:
+        - pg-data:/var/lib/postgresql/data
+      networks:
+        - app-backend
+  ```
+- Add database healthcheck and dependency ordering in `app`.
+
+#### Step 5: Test Harness & CI Compatibility
+- Maintain dual-backend test capability: developers and unit tests run fast in-process SQLite; CI integration runs against PostgreSQL.
+
+---
+
+### 4. Recommendation & Roadmap
+
+1. **Phase 1 (Immediate - Fix the Architectural Flaws in SQLite)**:
+   - **Debounce Scheduler Execution**: When an employee submits picks, record the picks in the database (a 2ms operation) and schedule a debounced background run of `run_scheduler` (or set a `rebuild_needed` flag).
+   - **Eliminate Write-on-Read**: Move the dashboard notification mark-read out of `GET /` into a dedicated async beacon or user-initiated action.
+   - **Add Retry Loop**: Wrap SQLite transactions in a 3-attempt exponential backoff handler for `OperationalError: database is locked`.
+   - *Verification*: Re-run `tools/liveweek.py --seed 42 --strict` to verify that all HTTP 500s and latency spikes vanish on SQLite.
+
+2. **Phase 2 (When Scaling Beyond a Single Store)**:
+   - Migrate to PostgreSQL using the blueprint above once multi-store multi-tenancy or multi-container horizontal scaling is scheduled on the product roadmap.
 
 ---
 

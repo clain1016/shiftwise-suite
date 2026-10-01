@@ -73,6 +73,9 @@ def _begin_week(state):
     notification watermark, and load the week's shifts.
 
     Returns False when the week has no shifts (nothing to schedule).
+
+    Reads: state.conn, state.week_start.
+    Mutates: state.notification_start, state.shifts, state.shift_ids.
     """
     conn = state.conn
     conn.execute("BEGIN IMMEDIATE")
@@ -90,6 +93,11 @@ def _collect_inputs(state):
     per-shift unavailable sets, the previous assignment snapshot, picks,
     users, and prior conflict notifications. Also evicts holders whose
     pending swap keeps them listed as unavailable for their own shift.
+
+    Reads: state.conn, state.shifts, state.shift_ids, state.notification_start.
+    Mutates: state.vacation_gap, state.ph, state.shift_by_id, state.unavailable,
+        state.previous, state.previous_staffed, state.picks, state.users,
+        state.prior_conflicts; DB (deletes swap-evicted assignment rows).
     """
     conn = state.conn
     shifts = state.shifts
@@ -128,7 +136,15 @@ def _collect_inputs(state):
 def _prepare_rebuild(state):
     """Wipe the week's auto assignments and seed the in-memory tracking from
     the rows that stay fixed, then build the preference lists used by the
-    assignment rounds."""
+    assignment rounds.
+
+    Reads: state.conn, state.shifts, state.shift_ids, state.ph, state.users,
+        state.picks.
+    Mutates: DB (deletes 'proposed'/'notified' assignment rows);
+        state.capacity, state.shift_hours_map, state.shift_by_id,
+        state.area_of, state.assigned, state.user_hours,
+        state.user_assignments, state.picks (filtered), state.user_prefs.
+    """
     conn = state.conn
     shift_ids = state.shift_ids
     ph = state.ph
@@ -189,7 +205,14 @@ def _prepare_rebuild(state):
 
 def _run_assignment_rounds(state):
     """Round-based lineup: in round N every employee claims their rank-N
-    pick; contested slots go to the highest-priority employee in line."""
+    pick; contested slots go to the highest-priority employee in line.
+
+    Reads: state.conn, state.actor, state.users, state.area_of,
+        state.shift_by_id, state.user_prefs, state.assigned, state.user_hours,
+        state.user_assignments, state.capacity, state.shift_hours_map.
+    Mutates: DB (inserts assignments, writes conflict notifications);
+        state.assigned, state.user_hours, state.user_assignments.
+    """
     conn = state.conn
     actor = state.actor
     users = state.users
@@ -265,7 +288,17 @@ def _backfill_coverage(state):
     slots (typical cause: a sick row vacated a taken slot) is auto-covered
     by the best available employee — those who picked it in lineup order
     first, then least-loaded with room. With no coverer, the manager gets a
-    'no cover available' notification."""
+    'no cover available' notification.
+
+    No-op unless the run actor is "system".
+
+    Reads: state.actor, state.conn, state.week_start, state.shifts,
+        state.capacity, state.assigned, state.user_hours,
+        state.user_assignments, state.shift_hours_map, state.vacation_gap,
+        state.previous_staffed.
+    Mutates: DB (inserts/updates assignments, writes notifications);
+        state.assigned, state.user_hours, state.user_assignments.
+    """
     if state.actor != "system":
         return
     conn = state.conn
@@ -327,7 +360,13 @@ def _backfill_coverage(state):
 
 def _resolve_swaps(state):
     """Once a replacement fills an unresolved swap's slot, clear the
-    original holder and close the request."""
+    original holder and close the request.
+
+    Reads: state.conn, state.capacity, state.assigned, state.shift_by_id,
+        state.shifts.
+    Mutates: DB (deletes filled swap_requested assignments, closes swap
+        requests, writes notifications).
+    """
     conn = state.conn
     capacity = state.capacity
     assigned = state.assigned
@@ -349,7 +388,12 @@ def _resolve_swaps(state):
 
 def _notify_schedule_changes(state):
     """Wrap-up notifications — only for employees whose schedule changed
-    (an auto-rebuild shouldn't spam unchanged schedules)."""
+    (an auto-rebuild shouldn't spam unchanged schedules).
+
+    Reads: state.conn, state.ph, state.shift_ids, state.users, state.previous,
+        state.shift_by_id, state.user_prefs.
+    Mutates: DB (writes assignment/conflict notifications).
+    """
     conn = state.conn
     ph = state.ph
     shift_ids = state.shift_ids
@@ -378,7 +422,13 @@ def _notify_schedule_changes(state):
 def _finalize_week(state):
     """Mark fresh proposed assignments as 'notified' so the next rebuild
     can tell whether anything changed for this employee, drop notifications
-    for unchanged schedules, and commit the week."""
+    for unchanged schedules, and commit the week.
+
+    Reads: state.conn, state.ph, state.shift_ids, state.users, state.previous,
+        state.prior_conflicts, state.notification_start.
+    Mutates: DB (updates assignments to 'notified', deletes notifications
+        for unchanged schedules, commits).
+    """
     conn = state.conn
     ph = state.ph
     shift_ids = state.shift_ids

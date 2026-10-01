@@ -75,6 +75,14 @@ def test_qmark_to_psycopg_translation():
     sql_block_comment = "SELECT /* check ? */ * FROM t WHERE id = ?"
     assert sdb._qmark_to_psycopg(sql_block_comment) == "SELECT /* check ? */ * FROM t WHERE id = %s"
 
+    # Literal percent signs are escaped for psycopg (even inside strings:
+    # psycopg treats % as a placeholder introducer there too)
+    sql_like = "SELECT 1 FROM notifications WHERE message LIKE 'No cover available%' AND id = ?"
+    assert sdb._qmark_to_psycopg(sql_like) == (
+        "SELECT 1 FROM notifications WHERE message LIKE 'No cover available%%' AND id = %s"
+    )
+    assert sdb._qmark_to_psycopg("SELECT 100 % 7") == "SELECT 100 %% 7"
+
 
 def test_postgres_row_semantics():
     class DummyCol:
@@ -228,6 +236,19 @@ def test_postgres_cursor_and_connection_facade():
     # Multiple close calls are idempotent
     pconn.close()
     assert len(pool.returned) == 1
+
+    # A putconn failure still detaches the lease (no leak, no reuse)
+    class FailingPool:
+        def putconn(self, conn):
+            raise RuntimeError("pool is closed")
+
+    pconn2 = sdb._PostgresConnection(FailingPool(), MockRawConn())
+    with pytest.raises(RuntimeError, match="pool is closed"):
+        pconn2.close()
+    # lease is detached: further use raises, second close is a silent no-op
+    with pytest.raises(RuntimeError, match="closed"):
+        pconn2.cursor()
+    pconn2.close()
 
     # Operations after close raise RuntimeError
     with pytest.raises(RuntimeError, match="closed"):

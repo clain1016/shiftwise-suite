@@ -119,14 +119,30 @@ def _database_engine():
 
 
 def _qmark_to_psycopg(query):
-    """Translate qmark parameters outside SQL strings and comments."""
+    """Translate qmark parameters to psycopg `%s` placeholders.
+
+    Literal `%` characters are escaped as `%%` (in every state, including
+    inside string literals and comments) because psycopg interprets `%`
+    as a placeholder introducer. The `%s` sequences this function inserts
+    are emitted directly and never re-processed.
+
+    Known limitations: PostgreSQL dollar-quoted strings (`$$...$$`),
+    `E'...'` backslash escapes, and the `?` / `?|` / `?&` JSON operators are
+    not specially handled. The application's SQL uses none of these; revisit
+    if that changes. Callers must not pass queries that already contain
+    `%s`/`%%` sequences.
+    """
     result = []
     index = 0
     state = "normal"
     while index < len(query):
         char = query[index]
         next_char = query[index + 1] if index + 1 < len(query) else ""
-        if state == "normal":
+        if char == "%":
+            # Escape before any state handling: a literal % is a placeholder
+            # introducer to psycopg everywhere, including inside strings.
+            result.append("%%")
+        elif state == "normal":
             if char == "'":
                 state = "single"
                 result.append(char)
@@ -277,11 +293,15 @@ class _PostgresConnection:
 
     def close(self):
         if not self._closed:
-            self._closed = True
             conn = self._connection
             self._connection = None
-            if conn is not None:
-                self._pool.putconn(conn)
+            try:
+                if conn is not None:
+                    self._pool.putconn(conn)
+            finally:
+                # Mark closed even if returning to the pool failed; the lease
+                # is detached either way and must not be reused.
+                self._closed = True
 
     def __enter__(self):
         self._check_closed()

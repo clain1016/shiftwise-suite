@@ -45,8 +45,18 @@ from shiftwise.scheduler.engine import run_scheduler
 from shiftwise import app, create_app
 
 
+# Keep compatibility writes here; delivery code depends only on its own module.
+_notification_patch_targets = {
+    "smtplib": (importlib.import_module("shiftwise.notify"), "_smtplib"),
+    "urllib": (importlib.import_module("shiftwise.notify"), "_urllib"),
+    "send_schedule_link": (
+        importlib.import_module("shiftwise.routes.roster"), "send_schedule_link"
+    ),
+}
+
+
 class _AppModule(types.ModuleType):
-    """Custom module wrapper to synchronize DB_PATH mutations across packages."""
+    """Propagate legacy database and notification patches to their consumers."""
 
     def __getattribute__(self, name):
         if name == "DB_PATH":
@@ -58,6 +68,9 @@ class _AppModule(types.ModuleType):
             _db_mod.DB_PATH = Path(val) if val is not None else val
             self.__dict__.pop("DB_PATH", None)
             return
+        if name in _notification_patch_targets:
+            module, attribute = _notification_patch_targets[name]
+            setattr(module, attribute, val)
         super().__setattr__(name, val)
 
 

@@ -6,7 +6,7 @@ import re
 import sqlite3
 import sys
 import threading
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 from werkzeug.security import generate_password_hash
@@ -384,6 +384,33 @@ class _PostgresRow(dict):
         return super().__getitem__(key)
 
 
+def _sqlite_scalar(value):
+    """Present a temporal column value the way SQLite does.
+
+    The application was written against SQLite's type system, where DATE,
+    TIME, and TIMESTAMP columns come back as TEXT. psycopg instead returns
+    native date/time/datetime objects, which breaks the app's string-based
+    handling (``date.fromisoformat`` on a date raises TypeError, ``.split``
+    and ``.strip`` don't exist on date objects, f-strings render
+    "09:00:00" instead of "09:00"). Normalizing once at the facade boundary
+    keeps every route, rule, and template working unchanged on both
+    backends:
+      - datetime -> naive "YYYY-MM-DDTHH:MM:SS". The app writes naive local
+        timestamps; the offset psycopg attaches for TIMESTAMPTZ is dropped
+        so comparisons against ``datetime.now()`` behave as on SQLite.
+      - date -> "YYYY-MM-DD".
+      - time -> "HH:MM" (shifts store HH:MM text on SQLite).
+    Non-temporal values pass through untouched.
+    """
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None).isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, time):
+        return value.strftime("%H:%M")
+    return value
+
+
 class _PostgresCursor:
     """Cursor facade translating qmarks and adapting returned rows."""
 
@@ -401,7 +428,7 @@ class _PostgresCursor:
     def _row(self, values):
         if values is None:
             return None
-        return _PostgresRow(values, self._cursor.description)
+        return _PostgresRow([_sqlite_scalar(v) for v in values], self._cursor.description)
 
     def fetchone(self):
         return self._row(self._cursor.fetchone())
@@ -470,6 +497,13 @@ class _PostgresConnection:
             self._connection = None
             try:
                 if conn is not None:
+                    # Never hand a mid-transaction connection back to the
+                    # pool: a caller that raised mid-transaction would
+                    # otherwise leave the slot `idle in transaction
+                    # (aborted)`, holding locks until a timeout reaps it and
+                    # eventually exhausting the pool. A rollback on an idle
+                    # connection is a harmless no-op.
+                    conn.rollback()
                     self._pool.putconn(conn)
             finally:
                 # Mark closed even if returning to the pool failed; the lease
@@ -512,7 +546,7 @@ def _postgres_pool_for(database_url):
                 # that failure mode. Scheduler compute is CPU-bound in
                 # Python, so a 30s statement budget and 5s lock-wait budget
                 # are generous backstops, not tight limits.
-                kwargs={"statement_timeout": "30s", "lock_timeout": "5s"},
+                kwargs={"options": "-c statement_timeout=30s -c lock_timeout=5s"},
             )
             try:
                 pool.open(wait=True)
@@ -557,6 +591,38 @@ def db():
 def execute_sql(conn, query, params=()):
     """Execute a query through the selected connection's backend adapter."""
     return conn.execute(query, params)
+
+
+def begin_write(conn):
+    """Open a write transaction on the given connection.
+
+    SQLite takes the write lock up front with BEGIN IMMEDIATE so a
+    concurrent writer fails fast instead of deadlocking mid-run; on
+    PostgreSQL the driver opens the transaction implicitly on the first
+    statement and writers serialize via MVCC instead. (Week-scoped
+    advisory locks replace this coarse serialization in Phase 4.)
+    """
+    if _database_engine() == "sqlite":
+        conn.execute("BEGIN IMMEDIATE")
+    # On PostgreSQL there is nothing to do: the transaction is already open.
+
+
+def _unique_violation_errors():
+    errors = [sqlite3.IntegrityError]
+    try:
+        from psycopg.errors import UniqueViolation
+    except ImportError:
+        # psycopg is absent in SQLite-only environments.
+        pass
+    else:
+        errors.append(UniqueViolation)
+    return tuple(errors)
+
+
+#: Exception types for unique-constraint violations on either backend, for
+#: use in `except` clauses. sqlite3 raises sqlite3.IntegrityError; psycopg
+#: raises psycopg.errors.UniqueViolation.
+UNIQUE_VIOLATION_ERRORS = _unique_violation_errors()
 
 
 def monday_of(d):

@@ -52,11 +52,11 @@ seed = (
 rng = random.Random(seed)
 print(f"\nRANDOM SEED = {seed}   (replay: python {Path(__file__).name} {seed})\n")
 
-# ---------- fresh mock DB
-for suf in ("", "-wal", "-shm"):
-    p = Path(str(appmod.DB_PATH) + suf)
-    if p.exists():
-        p.unlink()
+if appmod.database_engine() == "sqlite":
+    for suf in ("", "-wal", "-shm"):
+        p = Path(str(appmod.DB_PATH) + suf)
+        if p.exists():
+            p.unlink()
 appmod.init_db(seed_demo=True)
 n_emp, n_days, n_picks = mock_seed.seed(appmod, force=True)
 print(
@@ -214,9 +214,7 @@ def run_random():
         form = {}
         ranked = []
         for i, d in enumerate(days, 1):
-            sid = shift_id(h, d)
-            assert sid, f"missing {h} shift for {d}"
-            form[f"rank_{sid}"] = str(i)
+            form[f"rank_day_{d}"] = str(i)
             ranked.append(f"{i}.{d}")
         r = client.post("/pick", data=form, follow_redirects=True)
         assert b"Preferences saved" in r.data, f"pick rejected for {u}"
@@ -228,7 +226,7 @@ def run_random():
     noise_shift = shift_id("back", rng.choice(DAYS))
     conn = appmod.db()
     conn.execute(
-        "INSERT OR IGNORE INTO picks (user_id, shift_id, rank) VALUES (?,?,1)",
+        "INSERT INTO picks (user_id, shift_id, rank) VALUES (?,?,1) ON CONFLICT DO NOTHING",
         (uid_of(noise_u), noise_shift),
     )
     conn.commit()
@@ -443,7 +441,7 @@ def run_random():
     under = q(
         "SELECT s.day, s.area, s.slots, COUNT(a.id) n FROM shifts s "
         "LEFT JOIN assignments a ON a.shift_id=s.id AND a.status!='sick' "
-        "WHERE s.week_start=? GROUP BY s.id HAVING n < s.slots",
+        "WHERE s.week_start=? GROUP BY s.id, s.day, s.area, s.slots HAVING COUNT(a.id) < s.slots",
         (WEEK,),
     )
     print(

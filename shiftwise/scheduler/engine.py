@@ -3,7 +3,7 @@
 from collections import defaultdict
 from datetime import date, timedelta
 
-from shiftwise.db import db
+from shiftwise.db import begin_write, db
 from shiftwise.domain.constants import DAYS, MIN_DAYS_OFF
 from shiftwise.domain.rules import (
     assignment_block_reason,
@@ -84,7 +84,7 @@ def _begin_week(state):
     Mutates: state.notification_start, state.shifts, state.shift_ids.
     """
     conn = state.conn
-    conn.execute("BEGIN IMMEDIATE")
+    begin_write(conn)
     state.notification_start = conn.execute(
         "SELECT COALESCE(MAX(id), 0) FROM notifications"
     ).fetchone()[0]
@@ -303,7 +303,8 @@ def _run_assignment_rounds(state):
                 user_hours[uid] += shift_hours_map[sid]
                 user_assignments[uid].append((sid, False))
                 conn.execute(
-                    "INSERT OR IGNORE INTO assignments (shift_id, user_id) VALUES (?,?)", (sid, uid)
+                    "INSERT INTO assignments (shift_id, user_id) VALUES (?,?) ON CONFLICT DO NOTHING",
+                    (sid, uid),
                 )
             elif actor == "system":
                 shift = shift_by_id[sid]
@@ -359,6 +360,10 @@ def _backfill_coverage(state):
             if cover_uid is None:
                 mgr = conn.execute("SELECT id FROM users WHERE role='manager'").fetchone()
                 if mgr:
+                    # LIKE is case-sensitive on PostgreSQL (unlike SQLite),
+                    # but both the writer below and this check use the fixed
+                    # "No cover available" casing, so the match is exact on
+                    # either backend.
                     prior_alert = conn.execute(
                         "SELECT 1 FROM notifications WHERE user_id=? "
                         "AND shift_id=? AND kind='conflict' AND "
@@ -379,7 +384,7 @@ def _backfill_coverage(state):
             # record + notify (hours/days tracking stays DB-accurate
             # via the next build; insert directly to assignments)
             conn.execute(
-                "INSERT OR IGNORE INTO assignments (shift_id, user_id) VALUES (?,?)",
+                "INSERT INTO assignments (shift_id, user_id) VALUES (?,?) ON CONFLICT DO NOTHING",
                 (s["id"], cover_uid),
             )
             conn.execute(

@@ -342,8 +342,8 @@ def test_postgres_pool_sets_defensive_timeouts(monkeypatch):
 
     sdb._postgres_pool_for("postgresql://u:p@localhost:5432/db")
 
-    assert captured["kwargs"]["statement_timeout"] == "30s"
-    assert captured["kwargs"]["lock_timeout"] == "5s"
+    assert "-c statement_timeout=30s" in captured["kwargs"]["options"]
+    assert "-c lock_timeout=5s" in captured["kwargs"]["options"]
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # Refactoring Backlog
 
-> Status: five items merged (R1–R3, R5, R6); R4 in review as draft · Last reviewed: 2026-10-01
+> Status: all six items merged (R1–R6) · Last reviewed: 2026-10-02
 
 Bigger, judgment-call refactors left out of the mechanical cleanup in PR #13.
 Each item is specified so a future agent (or human) can pick it up and implement
@@ -84,6 +84,8 @@ Keep every flash message and status code identical.
 green; each request kind exercised (the test files cover them).
 
 ## R4 — Adopt ruff (lint + format)
+
+**Status:** implemented in [PR #27](https://github.com/clain1016/shiftwise-suite/pull/27) (merged 2026-10-02).
 
 **Problem.** No formatter/linter config exists; style is enforced by hand
 (PR #13 hand-wrapped ~15 long lines).

@@ -354,7 +354,7 @@ def _approve_switch(conn, r, req_id):
                 (r["target_shift_id"], r["user_id"]),
             )
             conn.execute(
-                "INSERT OR IGNORE INTO assignments (shift_id, user_id) VALUES (?,?)",
+                "INSERT INTO assignments (shift_id, user_id) VALUES (?,?) ON CONFLICT DO NOTHING",
                 (r["target_shift_id"], r["user_id"]),
             )
             conn.execute(

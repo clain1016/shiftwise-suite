@@ -2,7 +2,6 @@
 
 import os
 import smtplib
-import sqlite3
 import urllib.error
 from datetime import date
 
@@ -19,7 +18,7 @@ from flask import (
 from werkzeug.security import generate_password_hash
 
 from shiftwise.auth import login_required
-from shiftwise.db import database_engine, db, monday_of
+from shiftwise.db import UNIQUE_VIOLATION_ERRORS, database_engine, db, monday_of
 from shiftwise.domain.rules import valid_email, valid_phone
 from shiftwise.notify import notify, send_schedule_link
 from shiftwise.scheduler.engine import run_scheduler
@@ -79,7 +78,7 @@ def add_employee():
             ),
         )
         conn.commit()
-    except sqlite3.IntegrityError:
+    except UNIQUE_VIOLATION_ERRORS:
         flash("That username is already in use.")
     else:
         flash("Employee added.")

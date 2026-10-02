@@ -1,6 +1,5 @@
 """Employee self-service routes: dashboard, picks, swaps, and time-off requests."""
 
-import sqlite3
 from collections import defaultdict
 from datetime import date, datetime
 
@@ -17,7 +16,7 @@ from flask import (
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from shiftwise.auth import login_required
-from shiftwise.db import db, monday_of
+from shiftwise.db import UNIQUE_VIOLATION_ERRORS, begin_write, db, monday_of
 from shiftwise.domain.constants import DAYS
 from shiftwise.domain.rules import assignment_block_reason, valid_email
 from shiftwise.notify import notify
@@ -52,7 +51,7 @@ def settings():
                     (name, username, email or None, uid),
                 )
                 conn.commit()
-            except sqlite3.IntegrityError:
+            except UNIQUE_VIOLATION_ERRORS:
                 conn.close()
                 flash("That username is already in use.")
                 return redirect(url_for("settings"))
@@ -158,7 +157,7 @@ def dashboard():
         if my_assignments.get(shift["id"])
         not in (None, "sick", "swap_requested", "manager_fixed", "swap_invited")
     ]
-    conn.execute("UPDATE notifications SET read=1 WHERE user_id=?", (session["uid"],))
+    conn.execute("UPDATE notifications SET read=TRUE WHERE user_id=?", (session["uid"],))
     conn.commit()
     conn.close()
     return render_template(
@@ -246,11 +245,12 @@ def pick():
             conn.execute(
                 "INSERT INTO coverage_preferences (user_id, shift_id, willing) VALUES (?,?,?) "
                 "ON CONFLICT(user_id, shift_id) DO UPDATE SET willing=excluded.willing",
-                (uid, sid, int(willingness == "yes")),
+                (uid, sid, willingness == "yes"),
             )
     for rank, sid in ranked:
         conn.execute(
-            "INSERT OR REPLACE INTO picks (user_id, shift_id, rank) VALUES (?,?,?)",
+            "INSERT INTO picks (user_id, shift_id, rank) VALUES (?,?,?) "
+            "ON CONFLICT (user_id, shift_id) DO UPDATE SET rank=excluded.rank",
             (uid, sid, rank),
         )
     conn.commit()
@@ -284,7 +284,7 @@ def swap(shift_id):
         conn.execute("DELETE FROM assignments WHERE shift_id=? AND user_id=?", (shift_id, uid))
         conn.execute("DELETE FROM picks WHERE user_id=? AND shift_id=?", (uid, shift_id))
         conn.execute(
-            "INSERT OR IGNORE INTO assignments (shift_id, user_id) VALUES (?,?)",
+            "INSERT INTO assignments (shift_id, user_id) VALUES (?,?) ON CONFLICT DO NOTHING",
             (shift_id, cover_uid),
         )
         conn.execute(
@@ -645,7 +645,7 @@ def respond_to_swap(req_id):
         return redirect(url_for("my_requests"))
 
     conn = db()
-    conn.execute("BEGIN IMMEDIATE")
+    begin_write(conn)
     req = conn.execute(
         "SELECT * FROM requests WHERE id=? AND kind='swap' AND target_user_id=? "
         "AND status='approved'",

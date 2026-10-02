@@ -1,5 +1,5 @@
 {
-	email {$SHIFTWISE_ACME_EMAIL:operator@cysys.dev}
+	email {$SHIFTWISE_ACME_EMAIL:operator@cycsys.dev}
 	servers {
 		max_header_size 16kb
 	}

@@ -115,7 +115,7 @@ def apply_sick(conn, uid, shift_id, week=None):
     cover_uid = coverage_plan(conn, week, shift_id, uid)
     if cover_uid:
         conn.execute(
-            "INSERT OR IGNORE INTO assignments (shift_id, user_id) VALUES (?,?)",
+            "INSERT INTO assignments (shift_id, user_id) VALUES (?,?) ON CONFLICT DO NOTHING",
             (shift_id, cover_uid),
         )
         conn.execute(

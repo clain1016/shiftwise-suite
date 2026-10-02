@@ -7,6 +7,7 @@ field or the ``X-CSRF-Token`` header. The session cookie's ``SameSite`` policy
 (``shiftwise/config.py``) stays as a second line of defence — it is not a
 substitute for the token, because operators may turn it off.
 """
+
 import hmac
 import secrets
 

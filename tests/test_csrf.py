@@ -1,4 +1,5 @@
 """CSRF enforcement for the hand-rolled HTML forms (shiftwise/security.py)."""
+
 import re
 import sys
 import tempfile
@@ -35,8 +36,7 @@ class CsrfTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def login(self, client, username):
-        return client.post("/login",
-                           data={"username": username, "password": username})
+        return client.post("/login", data={"username": username, "password": username})
 
     def token_of(self, client):
         client.get("/login")
@@ -47,40 +47,42 @@ class CsrfTests(unittest.TestCase):
         html = client.get(path).data.decode()
         protected = 0
         for form in FORM_RE.findall(html):
-            if 'method="post"' not in form[:form.index(">") + 1].lower() \
-                    and 'formmethod="post"' not in form.lower():
+            if (
+                'method="post"' not in form[: form.index(">") + 1].lower()
+                and 'formmethod="post"' not in form.lower()
+            ):
                 continue
-            self.assertIn(CSRF_FIELD, form,
-                          f"{path} renders a POST form without a CSRF field")
+            self.assertIn(CSRF_FIELD, form, f"{path} renders a POST form without a CSRF field")
             protected += 1
         return protected
 
     def test_post_without_a_token_is_rejected(self):
-        response = self.plain.post("/login", data={"username": "manager",
-                                                   "password": "manager"})
+        response = self.plain.post("/login", data={"username": "manager", "password": "manager"})
         self.assertEqual(response.status_code, 400)
         with self.plain.session_transaction() as flask_session:
             self.assertNotIn("uid", flask_session)
 
     def test_forged_token_is_rejected(self):
         self.plain.get("/login")
-        response = self.plain.post("/login", data={"username": "manager",
-                                                   "password": "manager",
-                                                   CSRF_FIELD: "forged"})
+        response = self.plain.post(
+            "/login", data={"username": "manager", "password": "manager", CSRF_FIELD: "forged"}
+        )
         self.assertEqual(response.status_code, 400)
 
     def test_token_from_another_session_is_rejected(self):
         stolen = self.token_of(FlaskClient(appmod.app, appmod.app.response_class))
         self.plain.get("/login")
-        response = self.plain.post("/login", data={"username": "manager",
-                                                   "password": "manager",
-                                                   CSRF_FIELD: stolen})
+        response = self.plain.post(
+            "/login", data={"username": "manager", "password": "manager", CSRF_FIELD: stolen}
+        )
         self.assertEqual(response.status_code, 400)
 
     def test_header_token_is_accepted(self):
         response = self.plain.post(
-            "/login", data={"username": "manager", "password": "manager"},
-            headers={CSRF_HEADER: self.token_of(self.plain)})
+            "/login",
+            data={"username": "manager", "password": "manager"},
+            headers={CSRF_HEADER: self.token_of(self.plain)},
+        )
         self.assertEqual(response.status_code, 302)
 
     def test_get_requests_need_no_token(self):
@@ -93,13 +95,21 @@ class CsrfTests(unittest.TestCase):
         conn.execute(
             "INSERT INTO requests (user_id, kind, day, week_start, created_at) "
             "VALUES ((SELECT id FROM users WHERE username='alex'),'day_off','Fri',?,?)",
-            (appmod.monday_of(appmod.date.today()).isoformat(), "2026-01-01T00:00:00"))
+            (appmod.monday_of(appmod.date.today()).isoformat(), "2026-01-01T00:00:00"),
+        )
         conn.commit()
         conn.close()
 
-        protected = sum(self.assert_forms_are_protected(self.client, path) for path in (
-            "/manager", "/manager/requests", "/manager/roster",
-            "/manager/conflicts", "/account/password"))
+        protected = sum(
+            self.assert_forms_are_protected(self.client, path)
+            for path in (
+                "/manager",
+                "/manager/requests",
+                "/manager/roster",
+                "/manager/conflicts",
+                "/account/password",
+            )
+        )
         # the manager pages alone render the add-shift, delete-shift,
         # approve/deny, roster and override forms
         self.assertGreater(protected, 10)
@@ -115,24 +125,30 @@ class CsrfTests(unittest.TestCase):
         week = appmod.monday_of(appmod.date.today()).isoformat()
         conn = appmod.db()
         users = {
-            row["username"]: row["id"] for row in conn.execute(
-                "SELECT id, username FROM users WHERE username IN ('alex','sam')")
+            row["username"]: row["id"]
+            for row in conn.execute(
+                "SELECT id, username FROM users WHERE username IN ('alex','sam')"
+            )
         }
         shift_ids = []
         for start, end in (("01:00", "03:00"), ("03:00", "05:00")):
             cursor = conn.execute(
                 "INSERT INTO shifts (week_start, day, start_time, end_time, slots, area) "
-                "VALUES (?, 'Mon', ?, ?, 1, 'front')", (week, start, end))
+                "VALUES (?, 'Mon', ?, ?, 1, 'front')",
+                (week, start, end),
+            )
             shift_ids.append(cursor.lastrowid)
         conn.executemany(
             "INSERT INTO assignments (shift_id, user_id, status) VALUES (?, ?, 'notified')",
-            [(shift_ids[0], users["alex"]), (shift_ids[1], users["sam"])])
+            [(shift_ids[0], users["alex"]), (shift_ids[1], users["sam"])],
+        )
         # an employee-directed swap invitation for alex, so that /my-requests
         # renders the accept/decline form
         conn.execute(
             "INSERT INTO requests (user_id, kind, shift_id, target_shift_id, target_user_id, "
             "status, created_at) VALUES (?, 'swap', ?, ?, ?, 'approved', ?)",
-            (users["sam"], shift_ids[1], shift_ids[0], users["alex"], "2026-01-01T00:00:00"))
+            (users["sam"], shift_ids[1], shift_ids[0], users["alex"], "2026-01-01T00:00:00"),
+        )
         conn.commit()
         conn.close()
 

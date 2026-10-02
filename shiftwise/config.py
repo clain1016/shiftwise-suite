@@ -1,4 +1,5 @@
 """ShiftWise application configuration."""
+
 import os
 import secrets
 import warnings
@@ -31,9 +32,11 @@ class Config:
     # Session cookie security
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = os.environ.get("SHIFTWISE_SESSION_COOKIE_SAMESITE", "Lax")
-    SESSION_COOKIE_SECURE = os.environ.get(
-        "SHIFTWISE_SESSION_COOKIE_SECURE", ""
-    ).lower() in ("1", "true", "yes")
+    SESSION_COOKIE_SECURE = os.environ.get("SHIFTWISE_SESSION_COOKIE_SECURE", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
     # Bootstrap & Seeding
     BOOTSTRAP_MANAGER_PASSWORD = os.environ.get("SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD")

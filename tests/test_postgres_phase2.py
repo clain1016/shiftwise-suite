@@ -8,6 +8,7 @@ mock_seed's SQL survives the psycopg placeholder translation through the
 real facade classes, and prove the delete routes rely on DB cascades on
 PostgreSQL while keeping the manual cascades on SQLite.
 """
+
 import importlib
 import re
 from datetime import time as dt_time
@@ -29,8 +30,16 @@ mock_seed = importlib.import_module("mock_seed")
 # DDL structure
 # ---------------------------------------------------------------------------
 
-TABLES = ("users", "shifts", "picks", "coverage_preferences", "assignments",
-          "requests", "notifications", "login_attempts")
+TABLES = (
+    "users",
+    "shifts",
+    "picks",
+    "coverage_preferences",
+    "assignments",
+    "requests",
+    "notifications",
+    "login_attempts",
+)
 
 
 def test_postgres_ddl_defines_all_tables():
@@ -71,7 +80,8 @@ def test_postgres_ddl_fk_delete_actions_per_column():
     for (table, column), action in expected.items():
         block = re.search(
             rf"CREATE TABLE IF NOT EXISTS {table} \((.*?)\n\);",
-            schema, re.DOTALL,
+            schema,
+            re.DOTALL,
         )
         assert block, f"table {table} not found in POSTGRES_SCHEMA"
         match = re.search(
@@ -80,8 +90,7 @@ def test_postgres_ddl_fk_delete_actions_per_column():
         )
         assert match, f"{table}.{column}: no FK with a delete action"
         assert match.group(1) == action, (
-            f"{table}.{column}: expected ON DELETE {action}, "
-            f"found ON DELETE {match.group(1)}"
+            f"{table}.{column}: expected ON DELETE {action}, found ON DELETE {match.group(1)}"
         )
     # No more and no fewer FKs than pinned above.
     assert len(re.findall(r"REFERENCES \w+\(id\)", schema)) == len(expected)
@@ -165,6 +174,7 @@ def test_database_engine_public_accessor():
 # Recording fake connection
 # ---------------------------------------------------------------------------
 
+
 class _Rows:
     def __init__(self, rows):
         self._rows = list(rows)
@@ -180,9 +190,9 @@ class _RecordingConn:
     """Stands in for a DB connection: records statements, answers canned reads."""
 
     def __init__(self, handler=None):
-        self.statements = []        # list of (sql, params)
+        self.statements = []  # list of (sql, params)
         self.executemany_calls = []  # list of (sql, [params, ...])
-        self.events = []            # ordered event log ("execute", "commit", ...)
+        self.events = []  # ordered event log ("execute", "commit", ...)
         self.committed = False
         self.closed = False
         self._handler = handler or (lambda sql, params: [])
@@ -219,6 +229,7 @@ def _postgres_env(monkeypatch):
 # init_db() per-engine dispatch
 # ---------------------------------------------------------------------------
 
+
 def test_init_db_postgres_applies_schema_and_bootstraps(monkeypatch):
     _postgres_env(monkeypatch)
     monkeypatch.setenv("SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD", "long-enough-password")
@@ -227,8 +238,7 @@ def test_init_db_postgres_applies_schema_and_bootstraps(monkeypatch):
 
     sdb.init_db()
 
-    creates = [sql for sql, _ in conn.statements
-               if sql.startswith("CREATE TABLE IF NOT EXISTS")]
+    creates = [sql for sql, _ in conn.statements if sql.startswith("CREATE TABLE IF NOT EXISTS")]
     assert [c.split()[5] for c in creates] == list(TABLES)
     inserts = [sql for sql, _ in conn.statements if sql.startswith("INSERT INTO users")]
     assert len(inserts) == 1
@@ -274,15 +284,18 @@ def test_init_db_postgres_commits_schema_before_mock_seed_handoff(monkeypatch):
     monkeypatch.setattr(sdb, "db", lambda: conn)
     seed_calls = []
     monkeypatch.setattr(
-        mock_seed, "seed",
-        lambda appmod, force=False: (conn.events.append("mock_seed.seed"),
-                                     seed_calls.append(force)))
+        mock_seed,
+        "seed",
+        lambda appmod, force=False: (
+            conn.events.append("mock_seed.seed"),
+            seed_calls.append(force),
+        ),
+    )
 
     sdb.init_db(mock_roster=True)
 
     # The PG path applies exactly POSTGRES_SCHEMA (statement-split), not SCHEMA.
-    creates = [sql for sql, _ in conn.statements
-               if sql.startswith("CREATE TABLE IF NOT EXISTS")]
+    creates = [sql for sql, _ in conn.statements if sql.startswith("CREATE TABLE IF NOT EXISTS")]
     assert creates == sdb._split_ddl(sdb.POSTGRES_SCHEMA)
     assert not any("INTEGER PRIMARY KEY" in sql for sql in creates)
     # The schema commit lands before mock_seed opens its own connection.
@@ -313,6 +326,7 @@ def test_init_db_postgres_rolls_back_and_returns_lease_on_ddl_failure(monkeypatc
 def test_postgres_pool_sets_defensive_timeouts(monkeypatch):
     """The pool must bound runaway statements and lock waits server-side."""
     import psycopg_pool
+
     captured = {}
 
     class _FakePool:
@@ -335,6 +349,7 @@ def test_postgres_pool_sets_defensive_timeouts(monkeypatch):
 # ---------------------------------------------------------------------------
 # mock_seed through the real psycopg facade (translation + row adaptation)
 # ---------------------------------------------------------------------------
+
 
 class _StubColumn:
     def __init__(self, name):
@@ -391,10 +406,13 @@ class _PsycopgStubCursor:
             # Faithful to PostgreSQL, which adapts TIME to datetime.time
             # (SQLite returns TEXT). The seed must normalize these to HH:MM;
             # a stub that fabricates strings would hide that bug.
-            self._set([(r["id"], r["day"], r["area"],
-                        dt_time.fromisoformat(r["start_time"]))
-                       for r in store["shifts"]],
-                      ["id", "day", "area", "start_time"])
+            self._set(
+                [
+                    (r["id"], r["day"], r["area"], dt_time.fromisoformat(r["start_time"]))
+                    for r in store["shifts"]
+                ],
+                ["id", "day", "area", "start_time"],
+            )
         elif query == "SELECT 1 FROM users LIMIT 1":
             # R6 force guard probe: empty store -> guard passes.
             self._set([(1,)] if store["users"] else [], ["1"])
@@ -424,7 +442,7 @@ class _PsycopgStubCursor:
         return row
 
     def fetchall(self):
-        rows = self._rows[self._pos:]
+        rows = self._rows[self._pos :]
         self._pos = len(self._rows)
         return rows
 
@@ -470,15 +488,20 @@ def test_mock_seed_runs_cleanly_through_postgres_facade():
     # R6: the first statement is now the force-guard emptiness probe.
     assert stub.queries[0][0] == "SELECT 1 FROM users LIMIT 1"
     assert stub.queries[1][0] == "DELETE FROM picks"
-    assert any(q.startswith("INSERT INTO users (username, password, name, role, "
-                            "weekly_hours, employment_type, hired_on, station) "
-                            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)")
-               for q, _ in stub.queries)
+    assert any(
+        q.startswith(
+            "INSERT INTO users (username, password, name, role, "
+            "weekly_hours, employment_type, hired_on, station) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)"
+        )
+        for q, _ in stub.queries
+    )
 
 
 # ---------------------------------------------------------------------------
 # Delete routes: manual cascades only on SQLite, DB cascades on PostgreSQL
 # ---------------------------------------------------------------------------
+
 
 def _auth_handler(sql, params):
     if sql.startswith("SELECT role FROM users"):
@@ -506,9 +529,13 @@ def test_delete_shift_sqlite_keeps_manual_cascades(monkeypatch):
         return rows
 
     monkeypatch.setattr(manager_routes, "database_engine", lambda: "sqlite")
-    conn, _ = _login_and_call(monkeypatch, manager_routes,
-                              lambda: manager_routes.delete_shift(9),
-                              "/manager/shift/delete/9", handler=handler)
+    conn, _ = _login_and_call(
+        monkeypatch,
+        manager_routes,
+        lambda: manager_routes.delete_shift(9),
+        "/manager/shift/delete/9",
+        handler=handler,
+    )
     sqls = [sql for sql, _ in conn.statements]
     assert any("DELETE FROM picks WHERE shift_id=?" in s for s in sqls)
     assert any("DELETE FROM coverage_preferences WHERE shift_id=?" in s for s in sqls)
@@ -524,9 +551,13 @@ def test_delete_shift_postgres_relies_on_db_cascade(monkeypatch):
         return rows
 
     monkeypatch.setattr(manager_routes, "database_engine", lambda: "postgres")
-    conn, _ = _login_and_call(monkeypatch, manager_routes,
-                              lambda: manager_routes.delete_shift(9),
-                              "/manager/shift/delete/9", handler=handler)
+    conn, _ = _login_and_call(
+        monkeypatch,
+        manager_routes,
+        lambda: manager_routes.delete_shift(9),
+        "/manager/shift/delete/9",
+        handler=handler,
+    )
     sqls = [sql for sql, _ in conn.statements]
     # Request supersede still runs first on both engines (it is a status
     # update, not a cascade, and must precede the SET NULL on shift delete).
@@ -547,10 +578,14 @@ def _roster_handler(sql, params):
 
 def test_delete_employee_sqlite_keeps_manual_cascades(monkeypatch):
     monkeypatch.setattr(roster_routes, "database_engine", lambda: "sqlite")
-    conn, _ = _login_and_call(monkeypatch, roster_routes,
-                              lambda: roster_routes.delete_employee(5),
-                              "/manager/roster/5/delete",
-                              form={"confirm": "yes"}, handler=_roster_handler)
+    conn, _ = _login_and_call(
+        monkeypatch,
+        roster_routes,
+        lambda: roster_routes.delete_employee(5),
+        "/manager/roster/5/delete",
+        form={"confirm": "yes"},
+        handler=_roster_handler,
+    )
     sqls = [sql for sql, _ in conn.statements]
     for table in ("assignments", "picks", "coverage_preferences", "requests", "notifications"):
         assert any(f"DELETE FROM {table} WHERE user_id=?" in s for s in sqls), table
@@ -560,10 +595,14 @@ def test_delete_employee_sqlite_keeps_manual_cascades(monkeypatch):
 
 def test_delete_employee_postgres_relies_on_db_cascade(monkeypatch):
     monkeypatch.setattr(roster_routes, "database_engine", lambda: "postgres")
-    conn, _ = _login_and_call(monkeypatch, roster_routes,
-                              lambda: roster_routes.delete_employee(5),
-                              "/manager/roster/5/delete",
-                              form={"confirm": "yes"}, handler=_roster_handler)
+    conn, _ = _login_and_call(
+        monkeypatch,
+        roster_routes,
+        lambda: roster_routes.delete_employee(5),
+        "/manager/roster/5/delete",
+        form={"confirm": "yes"},
+        handler=_roster_handler,
+    )
     sqls = [sql for sql, _ in conn.statements]
     # user_id dependents are left for ON DELETE CASCADE ...
     for table in ("assignments", "picks", "coverage_preferences", "notifications"):

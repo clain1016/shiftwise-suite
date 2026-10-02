@@ -1,14 +1,17 @@
 """Pytest configuration and shared fixtures for ShiftWise test suite."""
+
 import sys
 from pathlib import Path
+
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import app as appmod
 from test_support import isolate_database
+
+import app as appmod
 from shiftwise.security import use_csrf_aware_test_client
 
 # Test clients attach a valid CSRF token to unsafe requests, so the suite

@@ -1,4 +1,5 @@
 """Authentication session helpers, login throttling, and decorators."""
+
 import os
 from datetime import datetime, timedelta
 from functools import wraps
@@ -60,13 +61,13 @@ def lockout_remaining(conn, username, ip):
     now = datetime.now()
     remaining = 0.0
     for row in conn.execute(
-            f"SELECT key, locked_until FROM login_attempts WHERE key IN ({placeholders})",
-            keys):
+        f"SELECT key, locked_until FROM login_attempts WHERE key IN ({placeholders})", keys
+    ):
         if not row["locked_until"] or not limits[row["key"]]:
             continue
         remaining = max(
-            remaining,
-            (datetime.fromisoformat(row["locked_until"]) - now).total_seconds())
+            remaining, (datetime.fromisoformat(row["locked_until"]) - now).total_seconds()
+        )
     return remaining
 
 
@@ -74,20 +75,21 @@ def note_login_failure(conn, username, ip):
     """Count a failed attempt and lock the identity once past its limit."""
     locked_until = (datetime.now() + timedelta(seconds=lockout_seconds())).isoformat()
     for key, limit in _limits(username, ip).items():
-        row = conn.execute("SELECT failures FROM login_attempts WHERE key=?",
-                           (key,)).fetchone()
+        row = conn.execute("SELECT failures FROM login_attempts WHERE key=?", (key,)).fetchone()
         failures = (row["failures"] if row else 0) + 1
         if limit and failures >= limit:
             conn.execute(
                 "INSERT INTO login_attempts (key, failures, locked_until) VALUES (?,?,?) "
                 "ON CONFLICT(key) DO UPDATE SET failures=excluded.failures, "
                 "locked_until=excluded.locked_until",
-                (key, failures, locked_until))
+                (key, failures, locked_until),
+            )
         else:
             conn.execute(
                 "INSERT INTO login_attempts (key, failures) VALUES (?,?) "
                 "ON CONFLICT(key) DO UPDATE SET failures=excluded.failures",
-                (key, failures))
+                (key, failures),
+            )
 
 
 def clear_login_failures(conn, username, ip):
@@ -118,14 +120,14 @@ def _login_url():
 
 def login_required(role=None):
     """Decorator requiring an authenticated session and optional matching role."""
+
     def deco(f):
         @wraps(f)
         def wrapper(*a, **kw):
             if "uid" not in session:
                 return redirect(_login_url())
             conn = db()
-            user = conn.execute("SELECT role FROM users WHERE id=?",
-                                (session["uid"],)).fetchone()
+            user = conn.execute("SELECT role FROM users WHERE id=?", (session["uid"],)).fetchone()
             conn.close()
             if not user:
                 session.clear()
@@ -133,5 +135,7 @@ def login_required(role=None):
             if role and (user["role"] != role or session.get("role") != role):
                 abort(403)
             return f(*a, **kw)
+
         return wrapper
+
     return deco

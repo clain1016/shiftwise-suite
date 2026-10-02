@@ -1,4 +1,5 @@
 """Authentication routes: login, logout, and password management."""
+
 import math
 
 from flask import (
@@ -15,8 +16,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from shiftwise.auth import (
     clear_login_failures,
     client_ip,
-    login_required,
     lockout_remaining,
+    login_required,
     note_login_failure,
     verify_credentials,
 )
@@ -35,8 +36,10 @@ def login():
         try:
             remaining = lockout_remaining(conn, username, ip)
             if remaining > 0:
-                flash("Too many failed sign-in attempts — try again in "
-                      f"{math.ceil(remaining / 60)} minute(s).")
+                flash(
+                    "Too many failed sign-in attempts — try again in "
+                    f"{math.ceil(remaining / 60)} minute(s)."
+                )
                 return render_template("login.html")
             user = verify_credentials(conn, username, password)
             if user:
@@ -71,14 +74,15 @@ def change_password():
             flash("Use a new password of at least 12 characters.")
             return redirect(url_for("change_password"))
         conn = db()
-        user = conn.execute("SELECT password FROM users WHERE id=?",
-                            (session["uid"],)).fetchone()
+        user = conn.execute("SELECT password FROM users WHERE id=?", (session["uid"],)).fetchone()
         if not user or not check_password_hash(user["password"], old_password):
             conn.close()
             flash("Current password is incorrect.")
             return redirect(url_for("change_password"))
-        conn.execute("UPDATE users SET password=? WHERE id=?",
-                     (generate_password_hash(new_password), session["uid"]))
+        conn.execute(
+            "UPDATE users SET password=? WHERE id=?",
+            (generate_password_hash(new_password), session["uid"]),
+        )
         conn.commit()
         conn.close()
         session.clear()

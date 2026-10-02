@@ -1,0 +1,25 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# F: pyflakes, E4/E7/E9: pycodestyle errors (runtime/syntax class),
+# I: isort (import sorting)
+select = ["F", "E4", "E7", "E9", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# app.py is the AGENTS.md §2 monkeypatch facade. Two findings are deliberate:
+# F822 — "DB_PATH" is listed in __all__ but resolves only via the _AppModule
+#   proxy (see R5 in docs/REFACTORING_BACKLOG.md); never add a static binding.
+# E402 — shiftwise.db must initialize (importlib) before the from-imports
+#   below it; the ordering is load-bearing for the facade.
+"app.py" = ["F822", "E402"]
+# shiftwise-mock/app.py inserts the repo root into sys.path before importing
+# the app package; the resulting E402 is intentional.
+"shiftwise-mock/app.py" = ["E402"]
+# tools/*.py scripts insert the repo root into sys.path before their imports;
+# those E402s are intentional.
+"tools/*.py" = ["E402"]
+# tests/*.py helpers insert the repo root into sys.path before importing
+# test_support and the app package; those E402s are intentional.
+"tests/*.py" = ["E402"]

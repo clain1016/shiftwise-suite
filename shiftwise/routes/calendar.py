@@ -1,4 +1,5 @@
 """Calendar view and container health check routes."""
+
 from collections import defaultdict
 from datetime import date, timedelta
 
@@ -35,38 +36,45 @@ def calendar_days(conn, week, user_id, area=None):
     """7-day grid for a week: shifts per day, assignment status + staff for user_id."""
     if area in ("front", "back"):
         shifts = conn.execute(
-            "SELECT * FROM shifts WHERE week_start=? AND area=? ORDER BY id",
-            (week, area)).fetchall()
+            "SELECT * FROM shifts WHERE week_start=? AND area=? ORDER BY id", (week, area)
+        ).fetchall()
     else:
         shifts = conn.execute(
-            "SELECT * FROM shifts WHERE week_start=? ORDER BY id", (week,)).fetchall()
+            "SELECT * FROM shifts WHERE week_start=? ORDER BY id", (week,)
+        ).fetchall()
     by_day = defaultdict(list)
     for s in shifts:
         rows = conn.execute(
             "SELECT a.status, a.user_id, u.name FROM assignments a "
             "JOIN users u ON u.id=a.user_id WHERE a.shift_id=? "
             "AND a.status NOT IN ('sick','swap_requested')",
-            (s["id"],)).fetchall()
+            (s["id"],),
+        ).fetchall()
         status = next((r["status"] for r in rows if r["user_id"] == user_id), None)
-        by_day[s["day"]].append({
-            "id": s["id"],
-            "time": f"{s['start_time']}–{s['end_time']}",
-            "start_time": s["start_time"],
-            "end_time": s["end_time"],
-            "note": s["note"],
-            "status": status,
-            "mine": status is not None,
-            "who": ", ".join(r["name"] for r in rows) or None,
-        })
+        by_day[s["day"]].append(
+            {
+                "id": s["id"],
+                "time": f"{s['start_time']}–{s['end_time']}",
+                "start_time": s["start_time"],
+                "end_time": s["end_time"],
+                "note": s["note"],
+                "status": status,
+                "mine": status is not None,
+                "who": ", ".join(r["name"] for r in rows) or None,
+            }
+        )
     start = date.fromisoformat(week)
     today = date.today().isoformat()
-    return [{
-        "name": DAYS[i],
-        "date": (start + timedelta(days=i)).isoformat(),
-        "label": (start + timedelta(days=i)).strftime("%b %d"),
-        "shifts": by_day[DAYS[i]],
-        "today": (start + timedelta(days=i)).isoformat() == today,
-    } for i in range(7)]
+    return [
+        {
+            "name": DAYS[i],
+            "date": (start + timedelta(days=i)).isoformat(),
+            "label": (start + timedelta(days=i)).strftime("%b %d"),
+            "shifts": by_day[DAYS[i]],
+            "today": (start + timedelta(days=i)).isoformat() == today,
+        }
+        for i in range(7)
+    ]
 
 
 @calendar_bp.route("/calendar")
@@ -79,21 +87,21 @@ def calendar_view():
         week = monday_of(date.today()).isoformat()
     conn = db()
     uid = session["uid"]
-    current_user = conn.execute(
-        "SELECT station FROM users WHERE id=?", (uid,)).fetchone()
+    current_user = conn.execute("SELECT station FROM users WHERE id=?", (uid,)).fetchone()
     area = request.args.get("area")
     if area not in ("front", "back"):
         area = current_user["station"] if current_user else "front"
     employees = []
     if session["role"] == "manager":
         employees = conn.execute(
-            "SELECT id, name FROM users WHERE role='employee' AND station=? ORDER BY name",
-            (area,)).fetchall()
+            "SELECT id, name FROM users WHERE role='employee' AND station=? ORDER BY name", (area,)
+        ).fetchall()
         req = request.args.get("user_id", "")
         if req.isdigit():
             row = conn.execute(
                 "SELECT id FROM users WHERE id=? AND role='employee' AND station=?",
-                (int(req), area)).fetchone()
+                (int(req), area),
+            ).fetchone()
             if row:
                 uid = row["id"]
     view_user = conn.execute("SELECT name FROM users WHERE id=?", (uid,)).fetchone()
@@ -101,9 +109,14 @@ def calendar_view():
     conn.close()
     d = date.fromisoformat(week)
     return render_template(
-        "calendar.html", days=days, week=week,
+        "calendar.html",
+        days=days,
+        week=week,
         view_name=view_user["name"] if view_user else session.get("name", ""),
-        employees=employees, view_id=uid, area=area,
+        employees=employees,
+        view_id=uid,
+        area=area,
         prev_week=(d - timedelta(days=7)).isoformat(),
         next_week=(d + timedelta(days=7)).isoformat(),
-        this_week=monday_of(date.today()).isoformat())
+        this_week=monday_of(date.today()).isoformat(),
+    )

@@ -1,4 +1,5 @@
 """In-app notifications and external schedule link delivery."""
+
 import base64
 import os
 import smtplib
@@ -26,8 +27,10 @@ def notify(conn, user_id, kind, message, shift_id=None):
 
 def send_schedule_link(channel, destination, employee_name, link):
     """Deliver a sign-in link through the configured SMTP or Twilio account."""
-    message_text = (f"Hi {employee_name}, use this link to sign in to ShiftWise "
-                    f"and submit your schedule preferences: {link}")
+    message_text = (
+        f"Hi {employee_name}, use this link to sign in to ShiftWise "
+        f"and submit your schedule preferences: {link}"
+    )
     if channel == "email":
         host = os.environ.get("SHIFTWISE_SMTP_HOST")
         sender = os.environ.get("SHIFTWISE_SMTP_FROM")
@@ -53,13 +56,16 @@ def send_schedule_link(channel, destination, employee_name, link):
         sender = os.environ.get("SHIFTWISE_TWILIO_FROM")
         if not sid or not token or not sender:
             raise ValueError("Text delivery is not configured (Twilio credentials/from missing).")
-        data = _urllib.parse.urlencode({"To": destination, "From": sender,
-                                        "Body": message_text}).encode()
+        data = _urllib.parse.urlencode(
+            {"To": destination, "From": sender, "Body": message_text}
+        ).encode()
         request_obj = _urllib.request.Request(
             f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",
-            data=data, headers={"Authorization": "Basic " +
-                                base64.b64encode(
-                                    f"{sid}:{token}".encode()).decode()})
+            data=data,
+            headers={
+                "Authorization": "Basic " + base64.b64encode(f"{sid}:{token}".encode()).decode()
+            },
+        )
         try:
             with _urllib.request.urlopen(request_obj, timeout=20) as response:
                 if response.status >= 300:

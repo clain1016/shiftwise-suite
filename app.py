@@ -4,21 +4,23 @@ Provides the primary WSGI application object 'app' for Gunicorn/Caddy and
 re-exports all domain functions, database helpers, and constants so existing
 tests, scripts, and deployment configurations continue to work without modification.
 """
-import os
+
 import importlib
+import os
 import smtplib
 import sys
 import types
+import urllib
 import urllib.error
 import urllib.parse
 import urllib.request
-import urllib
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
 _db_mod = importlib.import_module("shiftwise.db")
+from shiftwise import app, create_app
 from shiftwise.auth import login_required
 from shiftwise.db import (
     POSTGRES_SCHEMA,
@@ -42,15 +44,14 @@ from shiftwise.notify import notify, send_schedule_link
 from shiftwise.routes.calendar import calendar_days
 from shiftwise.scheduler.coverage import apply_sick, coverage_plan
 from shiftwise.scheduler.engine import run_scheduler
-from shiftwise import app, create_app
-
 
 # Keep compatibility writes here; delivery code depends only on its own module.
 _notification_patch_targets = {
     "smtplib": (importlib.import_module("shiftwise.notify"), "_smtplib"),
     "urllib": (importlib.import_module("shiftwise.notify"), "_urllib"),
     "send_schedule_link": (
-        importlib.import_module("shiftwise.routes.roster"), "send_schedule_link"
+        importlib.import_module("shiftwise.routes.roster"),
+        "send_schedule_link",
     ),
 }
 

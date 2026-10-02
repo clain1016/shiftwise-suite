@@ -1,4 +1,5 @@
 """ShiftWise scheduling application package."""
+
 from pathlib import Path
 
 from flask import Flask, session
@@ -14,11 +15,11 @@ from shiftwise.domain.rules import (
     unavailable_uids,
 )
 from shiftwise.notify import notify
+from shiftwise.presentation import format_clock
 from shiftwise.routes import register_blueprints
 from shiftwise.scheduler.coverage import apply_sick, coverage_plan
-from shiftwise.security import init_app as init_csrf
 from shiftwise.scheduler.engine import run_scheduler
-from shiftwise.presentation import format_clock
+from shiftwise.security import init_app as init_csrf
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 
@@ -34,6 +35,7 @@ def create_app(config_class=Config):
 
     if config_class.BEHIND_PROXY:
         from werkzeug.middleware.proxy_fix import ProxyFix
+
         flask_app.wsgi_app = ProxyFix(
             flask_app.wsgi_app,
             x_for=1,

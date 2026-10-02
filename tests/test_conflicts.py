@@ -1,12 +1,13 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import app as appmod
 from test_support import isolate_database
+
+import app as appmod
 
 
 def test_conflicts():
@@ -23,11 +24,13 @@ def test_conflicts():
         # Mon 1 slot, all 3 employees rank it #1 -> conflict with 3 claimants
         mon = conn.execute(
             "INSERT INTO shifts (week_start, day, start_time, end_time, slots) VALUES (?,?,?,?,?)",
-            (WEEK, "Mon", "09:00", "17:00", 1)).lastrowid
+            (WEEK, "Mon", "09:00", "17:00", 1),
+        ).lastrowid
         # Tue 1 slot, only jordan picks it -> no conflict
         tue = conn.execute(
             "INSERT INTO shifts (week_start, day, start_time, end_time, slots) VALUES (?,?,?,?,?)",
-            (WEEK, "Tue", "09:00", "17:00", 1)).lastrowid
+            (WEEK, "Tue", "09:00", "17:00", 1),
+        ).lastrowid
         for u in ("alex", "sam", "jordan"):
             uid = conn.execute("SELECT id FROM users WHERE username=?", (u,)).fetchone()[0]
             conn.execute("INSERT INTO picks (user_id, shift_id, rank) VALUES (?,?,1)", (uid, mon))
@@ -45,13 +48,18 @@ def test_conflicts():
         assert r.status_code == 200
         assert "Conflicts" in html
         assert "Mon" in html
-        assert "Tue" not in html.split("Conflicts —")[1].split("week of")[0]  # Tue never in a conflict card
+        assert (
+            "Tue" not in html.split("Conflicts —")[1].split("week of")[0]
+        )  # Tue never in a conflict card
         # jordan is BOH so his pick on the FOH Mon shift is excluded: 2 claimants,
         # sorted FT first then seniority: alex(FT 2021), sam(PT 2023)
-        assert html.index("Alex Rivera") < html.index("Sam Chen"), \
+        assert html.index("Alex Rivera") < html.index("Sam Chen"), (
             "claimants must be sorted by priority lineup"
-        assert html.index("Jordan Diaz") > html.index("Sam Chen") or "Jordan Diaz" not in html.split("Rank #1")[1].split("</table>")[0], \
-            "cross-house claimant must not appear in the FOH conflict group"
+        )
+        assert (
+            html.index("Jordan Diaz") > html.index("Sam Chen")
+            or "Jordan Diaz" not in html.split("Rank #1")[1].split("</table>")[0]
+        ), "cross-house claimant must not appear in the FOH conflict group"
         print("1. Conflict detected; BOH pick excluded; claimants sorted FT-first: OK")
 
         # --- 2. week navigation present
@@ -63,8 +71,11 @@ def test_conflicts():
         uid_sam_row = appmod.db()
         uid_sam = uid_sam_row.execute("SELECT id FROM users WHERE username='sam'").fetchone()[0]
         uid_sam_row.close()
-        r = client.post("/manager/conflicts/assign",
-                        data={"shift_id": mon, "user_id": uid_sam}, follow_redirects=True)
+        r = client.post(
+            "/manager/conflicts/assign",
+            data={"shift_id": mon, "user_id": uid_sam},
+            follow_redirects=True,
+        )
         assert r.status_code == 404, "conflict_assign endpoint should be gone"
         print("3. Manual assign endpoint removed (review-only manager): OK")
 
@@ -80,29 +91,41 @@ def test_conflicts():
         all_shifts = [r["id"] for r in conn3.execute("SELECT id FROM shifts").fetchall()]
         conn3.close()
         # re-rank all days: Mon #1, then Tue and the rest as backups (1..N)
-        picks_form = {f"rank_{sid}": str(i + 1) for i, sid in enumerate(
-            [mon] + [x for x in all_shifts if x != mon])}
+        picks_form = {
+            f"rank_{sid}": str(i + 1)
+            for i, sid in enumerate([mon] + [x for x in all_shifts if x != mon])
+        }
         client.post("/pick", data=picks_form)
         conn2 = appmod.db()
-        n_mon = conn2.execute("SELECT COUNT(*) c FROM assignments WHERE shift_id=?", (mon,)).fetchone()["c"]
+        n_mon = conn2.execute(
+            "SELECT COUNT(*) c FROM assignments WHERE shift_id=?", (mon,)
+        ).fetchone()["c"]
         status = conn2.execute(
             "SELECT a.status FROM assignments a JOIN users u ON u.id=a.user_id "
-            "WHERE u.username='alex' AND a.shift_id=?", (mon,)).fetchone()
+            "WHERE u.username='alex' AND a.shift_id=?",
+            (mon,),
+        ).fetchone()
         conn2.close()
         assert n_mon == 1, f"alex saving a pick should auto-assign Mon, got {n_mon}"
-        assert status is not None and status["status"] == "notified", \
+        assert status is not None and status["status"] == "notified", (
             f"auto assignments should be marked notified, got {status}"
-        print("4. Auto-assign fires on pick save (no manager action): OK (Mon auto-filled, status=notified)")
+        )
+        print(
+            "4. Auto-assign fires on pick save (no manager action): OK (Mon auto-filled, status=notified)"
+        )
 
         # --- 5. confirmed assignments survive a rebuild
         client.post("/logout")
         client.post("/login", data={"username": "sam", "password": "sam"})
-        client.post("/pick", data={f"rank_{mon}": "1"})   # sam PT loses contest but rebuild fires
+        client.post("/pick", data={f"rank_{mon}": "1"})  # sam PT loses contest but rebuild fires
         client.post("/logout")
         client.post("/login", data={"username": "manager", "password": "manager"})
         conn2 = appmod.db()
-        conn2.execute("UPDATE assignments SET status='confirmed' WHERE user_id="
-                      "(SELECT id FROM users WHERE username='alex') AND shift_id=?", (mon,))
+        conn2.execute(
+            "UPDATE assignments SET status='confirmed' WHERE user_id="
+            "(SELECT id FROM users WHERE username='alex') AND shift_id=?",
+            (mon,),
+        )
         conn2.commit()
         conn2.close()
         # force a rebuild via unassign (the only manager mutation that still exists)
@@ -111,10 +134,13 @@ def test_conflicts():
         conn2 = appmod.db()
         survived = conn2.execute(
             "SELECT status FROM assignments a JOIN users u ON u.id=a.user_id "
-            "WHERE u.username='alex' AND a.shift_id=?", (mon,)).fetchone()
+            "WHERE u.username='alex' AND a.shift_id=?",
+            (mon,),
+        ).fetchone()
         conn2.close()
-        assert survived and survived["status"] == "confirmed", \
+        assert survived and survived["status"] == "confirmed", (
             f"confirmed assignment must survive rebuild, got {survived}"
+        )
         print("5. Confirmed assignments survive auto-rebuild: OK")
 
         # --- 6. employees cannot reach the conflicts page

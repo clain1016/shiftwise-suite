@@ -1,4 +1,5 @@
 """Coverage planning and sick leave handler."""
+
 from collections import defaultdict
 
 from shiftwise.domain.rules import (
@@ -26,8 +27,8 @@ def coverage_plan(conn, week, out_shift_id, out_uid, allow_over_limits=False):
     if not shift:
         return None
     employees = conn.execute(
-        "SELECT * FROM users WHERE role='employee' AND station=? ORDER BY id",
-        (shift["area"],)).fetchall()
+        "SELECT * FROM users WHERE role='employee' AND station=? ORDER BY id", (shift["area"],)
+    ).fetchall()
     # current week hours + working days for every employee, excluding the
     # shift being covered (its holder's hours leave with them) and any
     # existing 'sick' rows (a sick assignment counts for nobody)
@@ -35,7 +36,8 @@ def coverage_plan(conn, week, out_shift_id, out_uid, allow_over_limits=False):
         "SELECT a.shift_id, a.user_id, a.status, s.start_time, s.end_time, s.day "
         "FROM assignments a JOIN shifts s ON s.id=a.shift_id "
         "WHERE s.week_start=? AND a.shift_id!=?",
-        (week, out_shift_id)).fetchall()
+        (week, out_shift_id),
+    ).fetchall()
     hours = defaultdict(float)
     for r in arows:
         if r["status"] in ("sick", "swap_requested"):
@@ -43,8 +45,10 @@ def coverage_plan(conn, week, out_shift_id, out_uid, allow_over_limits=False):
         hours[r["user_id"]] += shift_hours(r["start_time"], r["end_time"])
     # people already on this shift are not cover candidates (slots are 1
     # per person — UNIQUE(shift_id, user_id))
-    already_on = {r["user_id"] for r in conn.execute(
-        "SELECT user_id FROM assignments WHERE shift_id=?", (out_shift_id,))}
+    already_on = {
+        r["user_id"]
+        for r in conn.execute("SELECT user_id FROM assignments WHERE shift_id=?", (out_shift_id,))
+    }
 
     def can_cover(u):
         uid = u["id"]
@@ -56,17 +60,21 @@ def coverage_plan(conn, week, out_shift_id, out_uid, allow_over_limits=False):
         ).fetchone()
         if preference and not preference["willing"]:
             return False
-        return assignment_block_reason(
-            conn, uid, shift, allow_over_limits=allow_over_limits) is None
+        return (
+            assignment_block_reason(conn, uid, shift, allow_over_limits=allow_over_limits) is None
+        )
 
     # 1. people who picked this shift but didn't get it — best in lineup.
     # With out_uid=None (backfill pass) every picker is eligible to be
     # considered; already assigned people are filtered by can_cover.
-    picker_ids = {r["user_id"] for r in conn.execute(
-        "SELECT DISTINCT user_id FROM picks WHERE shift_id=?", (out_shift_id,))
-        if r["user_id"] != out_uid}
-    for u in sorted((u for u in employees if u["id"] in picker_ids),
-                    key=priority_key):
+    picker_ids = {
+        r["user_id"]
+        for r in conn.execute(
+            "SELECT DISTINCT user_id FROM picks WHERE shift_id=?", (out_shift_id,)
+        )
+        if r["user_id"] != out_uid
+    }
+    for u in sorted((u for u in employees if u["id"] in picker_ids), key=priority_key):
         if can_cover(u):
             return u["id"]
     # 2. fall back: least-loaded employee with room
@@ -86,34 +94,50 @@ def apply_sick(conn, uid, shift_id, week=None):
     cover, the manager gets an alert.
     """
     a = conn.execute(
-        "SELECT * FROM assignments WHERE shift_id=? AND user_id=?",
-        (shift_id, uid)).fetchone()
+        "SELECT * FROM assignments WHERE shift_id=? AND user_id=?", (shift_id, uid)
+    ).fetchone()
     if not a or a["status"] == "sick":
         return False
     shift = conn.execute("SELECT * FROM shifts WHERE id=?", (shift_id,)).fetchone()
     if not shift:
         return False
     week = shift["week_start"]
-    conn.execute("UPDATE assignments SET status='sick' WHERE shift_id=? AND user_id=?",
-                 (shift_id, uid))
-    notify(conn, uid, "conflict",
-           f"Sick call logged for {shift['day']} "
-           f"{shift['start_time']}-{shift['end_time']} — get well soon.")
+    conn.execute(
+        "UPDATE assignments SET status='sick' WHERE shift_id=? AND user_id=?", (shift_id, uid)
+    )
+    notify(
+        conn,
+        uid,
+        "conflict",
+        f"Sick call logged for {shift['day']} "
+        f"{shift['start_time']}-{shift['end_time']} — get well soon.",
+    )
     cover_uid = coverage_plan(conn, week, shift_id, uid)
     if cover_uid:
         conn.execute(
             "INSERT OR IGNORE INTO assignments (shift_id, user_id) VALUES (?,?)",
-            (shift_id, cover_uid))
+            (shift_id, cover_uid),
+        )
         conn.execute(
             "UPDATE assignments SET status='notified' WHERE shift_id=? AND user_id=? "
-            "AND status='proposed'", (shift_id, cover_uid))
-        notify(conn, cover_uid, "assignment",
-               f"Coverage: you're now on {shift['day']} "
-               f"{shift['start_time']}-{shift['end_time']} (covering a sick call).")
+            "AND status='proposed'",
+            (shift_id, cover_uid),
+        )
+        notify(
+            conn,
+            cover_uid,
+            "assignment",
+            f"Coverage: you're now on {shift['day']} "
+            f"{shift['start_time']}-{shift['end_time']} (covering a sick call).",
+        )
         return True
     mgr = conn.execute("SELECT id FROM users WHERE role='manager'").fetchone()
     if mgr:
-        notify(conn, mgr["id"], "conflict",
-               f"No cover available for {shift['day']} "
-               f"{shift['start_time']}-{shift['end_time']} — needs manual coverage.")
+        notify(
+            conn,
+            mgr["id"],
+            "conflict",
+            f"No cover available for {shift['day']} "
+            f"{shift['start_time']}-{shift['end_time']} — needs manual coverage.",
+        )
     return False

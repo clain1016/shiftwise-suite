@@ -1,4 +1,5 @@
 """Legacy app patches must still intercept delivery after the R1 refactor."""
+
 import importlib
 import urllib
 from unittest.mock import MagicMock, patch
@@ -20,8 +21,9 @@ def test_legacy_smtp_patch_intercepts_delivery(monkeypatch, replace_module):
     with patch("smtplib.SMTP", side_effect=AssertionError("unmocked SMTP")):
         target, name = (appmod, "smtplib") if replace_module else (appmod.smtplib, "SMTP")
         with patch.object(target, name) as replacement:
-            appmod.send_schedule_link("email", "alex@example.test", "Alex",
-                                      "https://staff.example.test/login")
+            appmod.send_schedule_link(
+                "email", "alex@example.test", "Alex", "https://staff.example.test/login"
+            )
             smtp = replacement.SMTP if replace_module else replacement
             smtp.assert_called_once()
             server = smtp.return_value.__enter__.return_value
@@ -48,8 +50,9 @@ def test_legacy_urllib_patch_intercepts_delivery(monkeypatch, replace_module):
             replacement = urlopen = MagicMock()
         urlopen.return_value.__enter__.return_value.status = 201
         with patch.object(target, name, replacement):
-            appmod.send_schedule_link("sms", "+15551234567", "Alex",
-                                      "https://staff.example.test/login")
+            appmod.send_schedule_link(
+                "sms", "+15551234567", "Alex", "https://staff.example.test/login"
+            )
             urlopen.assert_called_once()
             request = urlopen.call_args.args[0]
             assert urllib.parse.parse_qs(request.data.decode())["To"] == ["+15551234567"]
@@ -69,11 +72,15 @@ def test_legacy_sender_patch_intercepts_roster_and_restores(isolated_db, monkeyp
     original = roster_module.send_schedule_link
     with patch.object(appmod, "send_schedule_link") as sender:
         # Prevent external calls if the legacy patch fails to reach the route.
-        with patch("smtplib.SMTP", side_effect=AssertionError("unmocked SMTP")), \
-                patch("urllib.request.urlopen", side_effect=AssertionError("unmocked HTTP")):
-            response = client.post(f"/manager/roster/{uid}/send-link",
-                                   data={"channel": "email"}, follow_redirects=True)
-        sender.assert_called_once_with("email", "alex@example.test", "Alex Rivera",
-                                       "https://staff.example.test/login")
+        with (
+            patch("smtplib.SMTP", side_effect=AssertionError("unmocked SMTP")),
+            patch("urllib.request.urlopen", side_effect=AssertionError("unmocked HTTP")),
+        ):
+            response = client.post(
+                f"/manager/roster/{uid}/send-link", data={"channel": "email"}, follow_redirects=True
+            )
+        sender.assert_called_once_with(
+            "email", "alex@example.test", "Alex Rivera", "https://staff.example.test/login"
+        )
         assert b"Schedule link sent by email" in response.data
     assert roster_module.send_schedule_link is original

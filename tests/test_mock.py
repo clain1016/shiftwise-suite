@@ -1,4 +1,5 @@
 """Mock smoke tests: FOH/BOH separation, shift coverage, and seed shape."""
+
 import sys
 from pathlib import Path
 
@@ -9,11 +10,14 @@ TESTS_DIR = ROOT_DIR / "tests"
 if str(TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(TESTS_DIR))
 
-import app as appmod
-import mock_seed
+from datetime import date
+
 import pytest
 from test_support import isolate_database
-from datetime import date
+
+import app as appmod
+import mock_seed
+
 
 def test_mock_smoke():
     _test_db = isolate_database(appmod)
@@ -26,8 +30,12 @@ def test_mock_smoke():
 
     week = appmod.monday_of(__import__("datetime").date.today()).isoformat()
     conn = appmod.db()
-    ids = {(r["area"], r["day"], r["start_time"]): r["id"]
-           for r in conn.execute("SELECT id, day, area, start_time FROM shifts WHERE week_start=?", (week,))}
+    ids = {
+        (r["area"], r["day"], r["start_time"]): r["id"]
+        for r in conn.execute(
+            "SELECT id, day, area, start_time FROM shifts WHERE week_start=?", (week,)
+        )
+    }
     conn.close()
     mon_front, mon_back = ids[("front", "Mon", "07:00")], ids[("back", "Mon", "07:00")]
 
@@ -35,10 +43,14 @@ def test_mock_smoke():
     def full_form(client_user, mon_id):
         conn = appmod.db()
         house = conn.execute(
-            "SELECT station FROM users WHERE username=?", (client_user,)).fetchone()["station"]
-        ids = [r["id"] for r in conn.execute(
-            "SELECT id FROM shifts WHERE week_start=? AND area=? ORDER BY id",
-            (week, house))]
+            "SELECT station FROM users WHERE username=?", (client_user,)
+        ).fetchone()["station"]
+        ids = [
+            r["id"]
+            for r in conn.execute(
+                "SELECT id FROM shifts WHERE week_start=? AND area=? ORDER BY id", (week, house)
+            )
+        ]
         conn.close()
         ids.remove(mon_id)
         form = {f"rank_{mon_id}": "1"}
@@ -61,10 +73,12 @@ def test_mock_smoke():
     rows = conn.execute(
         "SELECT u.username, s.area, s.day FROM assignments a "
         "JOIN users u ON u.id=a.user_id JOIN shifts s ON s.id=a.shift_id "
-        "WHERE s.day='Mon' AND s.start_time='07:00'").fetchall()
+        "WHERE s.day='Mon' AND s.start_time='07:00'"
+    ).fetchall()
     cross = conn.execute(
         "SELECT u.username FROM assignments a JOIN users u ON u.id=a.user_id "
-        "JOIN shifts s ON s.id=a.shift_id WHERE s.area!=u.station").fetchall()
+        "JOIN shifts s ON s.id=a.shift_id WHERE s.area!=u.station"
+    ).fetchall()
     conn.close()
 
     on_front = sorted(r["username"] for r in rows if r["area"] == "front")
@@ -101,18 +115,26 @@ def test_seeded_demo_has_staggered_shifts_and_peak_staffing():
             assert [row["slots"] for row in shifts] == [expected_slots] * 3
             for hour in range(11, 19):
                 staffing = sum(
-                    row["slots"] for row in shifts
+                    row["slots"]
+                    for row in shifts
                     if row["start_time"] <= f"{hour:02}:00" and row["end_time"] > f"{hour:02}:00"
                 )
                 assert staffing >= 2, f"{area} {day} has {staffing} staff at {hour}:00"
 
         for employee in employees:
-            ranks = [row["rank"] for row in conn.execute(
-                "SELECT p.rank FROM picks p JOIN shifts s ON s.id=p.shift_id "
-                "WHERE p.user_id=? AND s.week_start=? ORDER BY p.rank",
-                (conn.execute("SELECT id FROM users WHERE username=?",
-                              (employee["username"],)).fetchone()["id"], week),
-            )]
+            ranks = [
+                row["rank"]
+                for row in conn.execute(
+                    "SELECT p.rank FROM picks p JOIN shifts s ON s.id=p.shift_id "
+                    "WHERE p.user_id=? AND s.week_start=? ORDER BY p.rank",
+                    (
+                        conn.execute(
+                            "SELECT id FROM users WHERE username=?", (employee["username"],)
+                        ).fetchone()["id"],
+                        week,
+                    ),
+                )
+            ]
             assert ranks == list(range(1, 22)), (employee["username"], ranks)
     conn.close()
     _test_db.cleanup()
@@ -130,15 +152,23 @@ def test_seeded_week_fills_peak_and_nonpeak_shifts_without_rule_violations():
         "SELECT s.id, s.day, s.slots, COUNT(a.id) AS staffed FROM shifts s "
         "LEFT JOIN assignments a ON a.shift_id=s.id "
         "AND a.status NOT IN ('sick','swap_requested') "
-        "WHERE s.week_start=? GROUP BY s.id ORDER BY s.id", (week,),
+        "WHERE s.week_start=? GROUP BY s.id ORDER BY s.id",
+        (week,),
     ).fetchall()
     assert shifts
-    gaps = [(shift["day"], shift["id"], shift["staffed"], shift["slots"])
-            for shift in shifts if shift["staffed"] != shift["slots"]]
+    gaps = [
+        (shift["day"], shift["id"], shift["staffed"], shift["slots"])
+        for shift in shifts
+        if shift["staffed"] != shift["slots"]
+    ]
     assert not gaps, gaps
     for shift in shifts:
         assert shift["staffed"] == shift["slots"], (
-            shift["day"], shift["id"], shift["staffed"], shift["slots"])
+            shift["day"],
+            shift["id"],
+            shift["staffed"],
+            shift["slots"],
+        )
 
     employee_totals = conn.execute(
         "SELECT u.username, u.weekly_hours, COUNT(DISTINCT s.day) AS workdays, "
@@ -149,7 +179,8 @@ def test_seeded_week_fills_peak_and_nonpeak_shifts_without_rule_violations():
         "FROM assignments a JOIN users u ON u.id=a.user_id "
         "JOIN shifts s ON s.id=a.shift_id "
         "WHERE s.week_start=? AND a.status NOT IN ('sick','swap_requested') "
-        "GROUP BY u.id", (week,),
+        "GROUP BY u.id",
+        (week,),
     ).fetchall()
     for employee in employee_totals:
         assert employee["hours"] <= employee["weekly_hours"]

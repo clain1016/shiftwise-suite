@@ -1,4 +1,5 @@
 """ShiftWise domain logic, constants, and rules."""
+
 from shiftwise.domain.constants import DAYS, MIN_DAYS_OFF
 from shiftwise.domain.rules import (
     assignment_block_reason,

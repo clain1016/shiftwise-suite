@@ -1,4 +1,5 @@
 """Presentation-only helpers for values stored in canonical database form."""
+
 from datetime import datetime
 
 

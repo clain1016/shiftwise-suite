@@ -56,7 +56,7 @@ Migrating to PostgreSQL establishes true multi-writer concurrency (MVCC), row-le
 
 ## 3. Phased Implementation Roadmap
 
-Per `AGENTS.md` guidelines, each phase is executed in a **dedicated feature branch and PR**, with verification before merging into `master` (targeted tests for the changed area by default — see the handoff checklist).
+Per `AGENTS.md` guidelines, each phase is executed in a **dedicated feature branch and PR**, with full verification (`./tools/run_all.sh`) before merging into `master` (leveraging targeted tests during active development per the §4 tiered regimen).
 
 ```mermaid
 flowchart LR
@@ -238,7 +238,7 @@ instead of leaking it. Full suite green on the merged head: 89 passed.
    - `shiftwise/notify.py`
 
 #### Acceptance Criteria:
-- Targeted pytest tests for every touched route/module pass 100% green against PostgreSQL (run the full suite only if the changes are cross-cutting or failures suggest wider impact).
+- Full collected pytest test suite passes 100% green against PostgreSQL (and in SQLite fallback mode without regression).
 - No `SyntaxError` or dialect mismatch errors in any route.
 
 ---
@@ -353,13 +353,17 @@ When an agent begins work on any phase:
    export DATABASE_URL="postgresql://postgres:devpass@127.0.0.1:5432/shiftwise_test"
    ```
 3. **Verify Targeted Tests Before Making Changes:**
-   Run only the tests covering the area the phase touches — not the full suite:
+   Run the tests covering the area the phase touches to establish an initial baseline without running the full suite (per the AGENTS.md §4 tiered regimen):
    ```sh
    .venv/bin/pytest tests/test_<area>.py -q
    ```
-4. **Execute the Phase Tasks** as specified in Section 3 above.
-5. **Run Targeted Verification:**
-   Re-run the targeted tests from step 3 plus any new tests the phase adds. Escalate to `./tools/run_all.sh --fast` (pytest suite only) or the full `./tools/run_all.sh` gate only when the phase touches shared/cross-cutting code, when targeted-test failures suggest wider impact, or when Matthew explicitly asks.
+4. **Execute the Phase Tasks** as specified in Section 3 above, using targeted tests (`pytest tests/<file>::<test>`) and `./tools/run_all.sh --fast` for wider checks in the active development loop.
+5. **Run the Full Verification Suite Before Opening PR:**
+   Per AGENTS.md §4, before opening a PR or marking a phase complete, the full verification gate must pass:
+   ```sh
+   ./tools/run_all.sh
+   ```
+   *(Note: during rapid iteration, `./tools/run_all.sh --fast` or `./tools/run_all.sh --no-liveweek` can be used for intermediate checks, but the full gate must be green before PR completion.)*
 6. **Open PR & Review:**
    - Deliver via GitHub PR (`gh pr create`).
    - Cross-reference `docs/POSTGRES_MIGRATION_PLAN.md` and mark the phase complete.

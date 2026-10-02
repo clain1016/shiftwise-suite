@@ -1,4 +1,5 @@
 """ShiftWise routes and blueprint registration."""
+
 from shiftwise.routes.auth import auth_bp
 from shiftwise.routes.calendar import calendar_bp
 from shiftwise.routes.conflicts import conflicts_bp

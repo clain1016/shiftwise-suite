@@ -19,9 +19,10 @@ Run against the MOCK DB (scheduler-mock), never the real one.
 Prints a schedule snapshot after every phase. The mock is left in the
 final state so you can click through it on port 5001.
 """
-import sys
+
 import os
 import sqlite3
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -35,9 +36,12 @@ from shiftwise.security import use_csrf_aware_test_client
 if len(sys.argv) > 1 and sys.argv[1].endswith(".db"):
     db_target = Path(sys.argv[1]).resolve()
 else:
-    db_target = Path(os.environ.get("SHIFTWISE_SCENARIO_DB_PATH",
-                     os.environ.get("SHIFTWISE_DB_PATH",
-                     ROOT_DIR / "tools" / "scenario_demo.db")))
+    db_target = Path(
+        os.environ.get(
+            "SHIFTWISE_SCENARIO_DB_PATH",
+            os.environ.get("SHIFTWISE_DB_PATH", ROOT_DIR / "tools" / "scenario_demo.db"),
+        )
+    )
 
 appmod.DB_PATH = db_target
 
@@ -48,8 +52,16 @@ for suffix in ("", "-wal", "-shm"):
 
 appmod.init_db(seed_demo=True)
 conn = sqlite3.connect(appmod.DB_PATH)
-for t in ("users", "shifts", "picks", "coverage_preferences", "assignments",
-          "notifications", "requests", "login_attempts"):
+for t in (
+    "users",
+    "shifts",
+    "picks",
+    "coverage_preferences",
+    "assignments",
+    "notifications",
+    "requests",
+    "login_attempts",
+):
     conn.execute(f"DELETE FROM {t}")
 conn.commit()
 conn.close()
@@ -60,9 +72,11 @@ client = appmod.app.test_client()
 DAYS = appmod.DAYS
 week = appmod.monday_of(appmod.date.today()).isoformat()
 
+
 def login(u):
     r = client.post("/login", data={"username": u, "password": u}, follow_redirects=True)
     assert b"Log out" in r.data, f"login failed for {u}"
+
 
 def day_shift_ids(area):
     conn = appmod.db()
@@ -76,6 +90,7 @@ def day_shift_ids(area):
         grouped[row["day"]].append(row["id"])
     return grouped
 
+
 def full_form(day_to_ids, preferred_days):
     order = list(preferred_days) + [d for d in appmod.DAYS if d not in preferred_days]
     form = {}
@@ -85,20 +100,25 @@ def full_form(day_to_ids, preferred_days):
             form[f"rank_{shift_id}"] = str(rank)
     return form
 
+
 def snapshot(title):
     conn = appmod.db()
     print(f"\n--- {title} ---")
-    for s in conn.execute(
-            "SELECT * FROM shifts WHERE week_start=? ORDER BY id", (week,)):
+    for s in conn.execute("SELECT * FROM shifts WHERE week_start=? ORDER BY id", (week,)):
         staff = conn.execute(
             "SELECT u.name, a.status FROM assignments a JOIN users u ON u.id=a.user_id "
-            "WHERE a.shift_id=? AND a.status NOT IN ('sick','swap_requested') ORDER BY u.id", (s["id"],)).fetchall()
+            "WHERE a.shift_id=? AND a.status NOT IN ('sick','swap_requested') ORDER BY u.id",
+            (s["id"],),
+        ).fetchall()
         sick = conn.execute(
             "SELECT u.name FROM assignments a JOIN users u ON u.id=a.user_id "
-            "WHERE a.shift_id=? AND a.status='sick'", (s["id"],)).fetchall()
+            "WHERE a.shift_id=? AND a.status='sick'",
+            (s["id"],),
+        ).fetchall()
         flag = "OK" if len(staff) >= s["slots"] else "GAP"
-        line = (f"  {s['day']:<4} {s['start_time']}-{s['end_time']} "
-                f"{len(staff)}/{s['slots']} [{flag}] ")
+        line = (
+            f"  {s['day']:<4} {s['start_time']}-{s['end_time']} {len(staff)}/{s['slots']} [{flag}] "
+        )
         line += ", ".join(f"{r['name'].split()[0]}({r['status'][:4]})" for r in staff)
         if sick:
             line += f"   <<out sick: {', '.join(r['name'].split()[0] for r in sick)}>>"
@@ -108,12 +128,18 @@ def snapshot(title):
         rows = conn.execute(
             "SELECT s.day, a.status, s.start_time, s.end_time FROM assignments a "
             "JOIN shifts s ON s.id=a.shift_id "
-            "WHERE a.user_id=? AND s.week_start=? ORDER BY s.id", (u["id"], week)).fetchall()
-        hrs = sum(appmod.shift_hours(r["start_time"], r["end_time"])
-                  for r in rows if r["status"] not in ("sick", "swap_requested"))
+            "WHERE a.user_id=? AND s.week_start=? ORDER BY s.id",
+            (u["id"], week),
+        ).fetchall()
+        hrs = sum(
+            appmod.shift_hours(r["start_time"], r["end_time"])
+            for r in rows
+            if r["status"] not in ("sick", "swap_requested")
+        )
         wd = ", ".join(f"{r['day']}({r['status'][:4]})" for r in rows) or "none"
         print(f"    {u['name'].split()[0]:<7} cap {u['weekly_hours']}h -> {hrs:>4.0f}h | {wd}")
     conn.close()
+
 
 def emp_uid(username):
     conn = appmod.db()
@@ -121,31 +147,42 @@ def emp_uid(username):
     conn.close()
     return uid
 
+
 def active_staff(shift_id):
     conn = appmod.db()
     rows = conn.execute(
         "SELECT a.user_id, u.name FROM assignments a JOIN users u ON u.id=a.user_id "
         "WHERE a.shift_id=? AND a.status NOT IN ('sick','swap_requested')",
-        (shift_id,)).fetchall()
+        (shift_id,),
+    ).fetchall()
     conn.close()
     return {row["user_id"]: row["name"] for row in rows}
+
 
 def holding(username):
     conn = appmod.db()
     rows = conn.execute(
         "SELECT s.id, s.day, a.status FROM assignments a JOIN shifts s ON s.id=a.shift_id "
         "WHERE a.user_id=? AND s.week_start=? ORDER BY s.id",
-        (emp_uid(username), week)).fetchall()
+        (emp_uid(username), week),
+    ).fetchall()
     conn.close()
     return rows
 
+
 def last_conflicts(username, n=3):
     conn = appmod.db()
-    msgs = [r["message"] for r in conn.execute(
-        "SELECT message FROM notifications WHERE user_id=? AND kind='conflict' "
-        "ORDER BY id DESC LIMIT ?", (emp_uid(username), n))]
+    msgs = [
+        r["message"]
+        for r in conn.execute(
+            "SELECT message FROM notifications WHERE user_id=? AND kind='conflict' "
+            "ORDER BY id DESC LIMIT ?",
+            (emp_uid(username), n),
+        )
+    ]
     conn.close()
     return msgs
+
 
 def run_demo():
     # ================================================= PHASE 1
@@ -157,12 +194,14 @@ def run_demo():
         login(user)
         client.get("/")
         conn = appmod.db()
-        house = conn.execute(
-            "SELECT station FROM users WHERE username=?", (user,)).fetchone()["station"]
+        house = conn.execute("SELECT station FROM users WHERE username=?", (user,)).fetchone()[
+            "station"
+        ]
         conn.close()
         day_to_ids = day_shift_ids(house)
-        form = full_form(day_to_ids, [day for day, _ in sorted(
-            prefs.items(), key=lambda item: item[1])])
+        form = full_form(
+            day_to_ids, [day for day, _ in sorted(prefs.items(), key=lambda item: item[1])]
+        )
         response = client.post("/pick", data=form, follow_redirects=True)
         assert b"Preferences saved" in response.data, user
     snapshot("after all submit preferences (auto-assigned, no confirmations)")
@@ -176,8 +215,10 @@ def run_demo():
     before = active_staff(mon["id"])
     client.post(f"/request/sick/{mon['id']}", follow_redirects=True)
     new_staff = set(active_staff(mon["id"]).items()) - set(before.items())
-    print(f"  maria marked 'out sick'; instant coverer: "
-          f"{', '.join(name for _, name in new_staff) if new_staff else 'NOBODY — manager alerted'}")
+    print(
+        f"  maria marked 'out sick'; instant coverer: "
+        f"{', '.join(name for _, name in new_staff) if new_staff else 'NOBODY — manager alerted'}"
+    )
     snapshot("after maria's sick call")
 
     # ================================================= PHASE 3: day off
@@ -195,14 +236,20 @@ def run_demo():
     login("sam")
     today = appmod.date.today()
     vend = (appmod.monday_of(today) + appmod.timedelta(days=13)).isoformat()
-    client.post("/request/vacation",
-                data={"vac_start": today.isoformat(), "vac_end": vend},
-                follow_redirects=True)
+    client.post(
+        "/request/vacation",
+        data={"vac_start": today.isoformat(), "vac_end": vend},
+        follow_redirects=True,
+    )
     conn = appmod.db()
-    sam_left = [r2["day"] for r2 in conn.execute(
-        "SELECT s.day FROM assignments a JOIN shifts s ON s.id=a.shift_id "
-        "WHERE a.user_id=? AND s.week_start=? AND a.status NOT IN ('sick','swap_requested')",
-        (emp_uid("sam"), week))]
+    sam_left = [
+        r2["day"]
+        for r2 in conn.execute(
+            "SELECT s.day FROM assignments a JOIN shifts s ON s.id=a.shift_id "
+            "WHERE a.user_id=? AND s.week_start=? AND a.status NOT IN ('sick','swap_requested')",
+            (emp_uid("sam"), week),
+        )
+    ]
     conn.close()
     print(f"  RESOLVED: sam's in-range shifts dropped; he still holds: {sam_left or 'none'}")
     snapshot("after sam's vacation request")
@@ -216,33 +263,44 @@ def run_demo():
     j_shift = conn.execute(
         "SELECT s.id, s.day FROM assignments a JOIN shifts s ON s.id=a.shift_id "
         "WHERE a.user_id=? AND s.week_start=? AND a.status='notified' LIMIT 1",
-        (emp_uid("jordan"), week)).fetchone()
+        (emp_uid("jordan"), week),
+    ).fetchone()
     full_target = conn.execute(
         "SELECT s.id, s.day FROM shifts s WHERE s.week_start=? AND s.area="
         "(SELECT station FROM users WHERE username='jordan') AND s.id NOT IN "
         "(SELECT a.shift_id FROM assignments a WHERE a.user_id=?) AND "
         "(SELECT COUNT(*) FROM assignments a WHERE a.shift_id=s.id AND a.status NOT IN ('sick','swap_requested')) >= s.slots "
-        "ORDER BY s.id LIMIT 1", (week, emp_uid("jordan"))).fetchone()
+        "ORDER BY s.id LIMIT 1",
+        (week, emp_uid("jordan")),
+    ).fetchone()
     conn.close()
     if j_shift and full_target:
-        client.post(f"/request/switch/{j_shift['id']}",
-                    data={"target_shift": str(full_target["id"])}, follow_redirects=True)
+        client.post(
+            f"/request/switch/{j_shift['id']}",
+            data={"target_shift": str(full_target["id"])},
+            follow_redirects=True,
+        )
         client.post("/logout")
         login("manager")
         conn = appmod.db()
         rid = conn.execute(
-            "SELECT id FROM requests WHERE kind='switch' ORDER BY id DESC LIMIT 1").fetchone()[0]
+            "SELECT id FROM requests WHERE kind='switch' ORDER BY id DESC LIMIT 1"
+        ).fetchone()[0]
         conn.close()
         client.post(f"/manager/requests/{rid}/approve", follow_redirects=True)
         conn = appmod.db()
         still = conn.execute(
             "SELECT s.day FROM assignments a JOIN shifts s ON s.id=a.shift_id "
-            "WHERE a.user_id=? AND a.shift_id=?", (emp_uid("jordan"), j_shift["id"])).fetchone()
+            "WHERE a.user_id=? AND a.shift_id=?",
+            (emp_uid("jordan"), j_shift["id"]),
+        ).fetchone()
         st = conn.execute("SELECT status FROM requests WHERE id=?", (rid,)).fetchone()["status"]
         conn.close()
-        print(f"  RESOLVED: switch {j_shift['day']} -> {full_target['day']} "
-              f"auto-DENIED ({st}) — target full; jordan keeps {j_shift['day']}: "
-              f"{'yes' if still else 'no'}")
+        print(
+            f"  RESOLVED: switch {j_shift['day']} -> {full_target['day']} "
+            f"auto-DENIED ({st}) — target full; jordan keeps {j_shift['day']}: "
+            f"{'yes' if still else 'no'}"
+        )
     else:
         print("  no full-shift target available — skipping")
     snapshot("after the denied switch (capacity guard)")
@@ -260,11 +318,14 @@ def run_demo():
         conn = appmod.db()
         gone = conn.execute(
             "SELECT 1 FROM assignments WHERE shift_id=? AND user_id=?",
-            (tgt["id"], emp_uid("devon"))).fetchone()
+            (tgt["id"], emp_uid("devon")),
+        ).fetchone()
         conn.close()
         new_staff = set(active_staff(tgt["id"]).items()) - set(before.items())
-        print(f"  devon requested a swap on {tgt['day']} (row removed: {'yes' if not gone else 'no'})"
-              f"; auto-coverer: {', '.join(name for _, name in new_staff) if new_staff else 'NOBODY — manager alerted'}")
+        print(
+            f"  devon requested a swap on {tgt['day']} (row removed: {'yes' if not gone else 'no'})"
+            f"; auto-coverer: {', '.join(name for _, name in new_staff) if new_staff else 'NOBODY — manager alerted'}"
+        )
     else:
         print("  devon holds no swappable shift — skipping")
     snapshot("after devon's swap request")
@@ -280,12 +341,16 @@ def run_demo():
     conn.commit()
     conn.close()
     form = full_form(day_shift_ids("back"), ["Mon", "Tue", "Wed", "Fri", "Sat"])
-    assert b"Preferences saved" in client.post(
-        "/pick", data=form, follow_redirects=True).data
+    assert b"Preferences saved" in client.post("/pick", data=form, follow_redirects=True).data
     conn = appmod.db()
-    notifs = [n["message"] for n in conn.execute(
-        "SELECT message FROM notifications WHERE user_id=? AND kind='conflict' "
-        "ORDER BY id DESC LIMIT 3", (emp_uid("riley"),))]
+    notifs = [
+        n["message"]
+        for n in conn.execute(
+            "SELECT message FROM notifications WHERE user_id=? AND kind='conflict' "
+            "ORDER BY id DESC LIMIT 3",
+            (emp_uid("riley"),),
+        )
+    ]
     conn.close()
     for n in notifs:
         print(f"  riley notified: {n}")
@@ -300,12 +365,16 @@ def run_demo():
     conn = appmod.db()
     conn.close()
     form = full_form(day_shift_ids("front"), ["Mon", "Tue", "Wed", "Thu", "Fri", "Sun"])
-    assert b"Preferences saved" in client.post(
-        "/pick", data=form, follow_redirects=True).data
+    assert b"Preferences saved" in client.post("/pick", data=form, follow_redirects=True).data
     conn = appmod.db()
-    notifs = [n["message"] for n in conn.execute(
-        "SELECT message FROM notifications WHERE user_id=? AND kind='conflict' "
-        "ORDER BY id DESC LIMIT 3", (emp_uid("sam"),))]
+    notifs = [
+        n["message"]
+        for n in conn.execute(
+            "SELECT message FROM notifications WHERE user_id=? AND kind='conflict' "
+            "ORDER BY id DESC LIMIT 3",
+            (emp_uid("sam"),),
+        )
+    ]
     conn.close()
     for n in notifs:
         print(f"  sam notified: {n}")
@@ -321,20 +390,27 @@ def run_demo():
         "SELECT a.shift_id, a.user_id, s.day, u.name FROM assignments a "
         "JOIN shifts s ON s.id=a.shift_id JOIN users u ON u.id=a.user_id "
         "WHERE s.week_start=? AND s.day='Mon' AND u.username='riley' "
-        "AND a.status='notified'", (week,)).fetchone()
+        "AND a.status='notified'",
+        (week,),
+    ).fetchone()
     conn.close()
     if victim:
-        client.post(f"/manager/unassign/{victim['shift_id']}/{victim['user_id']}",
-                    follow_redirects=True)
+        client.post(
+            f"/manager/unassign/{victim['shift_id']}/{victim['user_id']}", follow_redirects=True
+        )
         conn = appmod.db()
         new = conn.execute(
             "SELECT u.name FROM assignments a JOIN users u ON u.id=a.user_id "
             "WHERE a.shift_id=? AND a.user_id!=? AND a.status NOT IN ('sick','swap_requested') "
-            "ORDER BY a.id DESC LIMIT 1", (victim["shift_id"], victim["user_id"])).fetchone()
+            "ORDER BY a.id DESC LIMIT 1",
+            (victim["shift_id"], victim["user_id"]),
+        ).fetchone()
         conn.close()
         riley_now = [r["day"] for r in holding("riley")]
-        print(f"  RESOLVED: riley pulled off Mon (now holds: {riley_now or 'nothing'}); "
-              f"backfilled by: {new['name'] if new else 'NOBODY'}")
+        print(
+            f"  RESOLVED: riley pulled off Mon (now holds: {riley_now or 'nothing'}); "
+            f"backfilled by: {new['name'] if new else 'NOBODY'}"
+        )
     else:
         print("  riley not holding Mon — skipping")
     snapshot("after manager unassign + auto-backfill")
@@ -348,7 +424,9 @@ def run_demo():
         "SELECT a.user_id, a.shift_id, u.username FROM assignments a "
         "JOIN users u ON u.id=a.user_id JOIN shifts s ON s.id=a.shift_id "
         "WHERE s.week_start=? AND s.day='Mon' AND a.status='notified' "
-        "ORDER BY a.id LIMIT 2", (week,)).fetchall()
+        "ORDER BY a.id LIMIT 2",
+        (week,),
+    ).fetchall()
     conn.close()
     for h in mon_holders:
         login(h["username"])
@@ -356,20 +434,33 @@ def run_demo():
     if mon_holders:
         sid = mon_holders[0]["shift_id"]
         conn = appmod.db()
-        sick_now = [r["name"].split()[0] for r in conn.execute(
-            "SELECT u.name FROM assignments a JOIN users u ON u.id=a.user_id "
-            "WHERE a.shift_id=? AND a.status='sick'", (sid,))]
-        covers = [r["name"].split()[0] for r in conn.execute(
-            "SELECT u.name FROM assignments a JOIN users u ON u.id=a.user_id "
-            "WHERE a.shift_id=? AND a.status='notified' ORDER BY a.id", (sid,))]
+        sick_now = [
+            r["name"].split()[0]
+            for r in conn.execute(
+                "SELECT u.name FROM assignments a JOIN users u ON u.id=a.user_id "
+                "WHERE a.shift_id=? AND a.status='sick'",
+                (sid,),
+            )
+        ]
+        covers = [
+            r["name"].split()[0]
+            for r in conn.execute(
+                "SELECT u.name FROM assignments a JOIN users u ON u.id=a.user_id "
+                "WHERE a.shift_id=? AND a.status='notified' ORDER BY a.id",
+                (sid,),
+            )
+        ]
         conn.close()
-        print(f"  out sick on Mon: {sick_now}; covers assigned: {covers or 'none — manager alerted'}")
+        print(
+            f"  out sick on Mon: {sick_now}; covers assigned: {covers or 'none — manager alerted'}"
+        )
     else:
         print("  no Monday holders to test with")
     snapshot("final schedule after conflict scenarios")
 
     print(f"\nScenario database: {appmod.DB_PATH}")
     print("Manager login: manager/manager · employees: username = password.")
+
 
 if __name__ == "__main__":
     run_demo()

@@ -1,8 +1,9 @@
 """Unit tests for containerization readiness, health checks, and proxy integration."""
+
 import os
 import sys
-import unittest
 import tempfile
+import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -44,9 +45,9 @@ class TestContainerDeployment(unittest.TestCase):
         appmod.init_db(mock_roster=True)
         conn = appmod.db()
         employee_count = conn.execute(
-            "SELECT COUNT(*) c FROM users WHERE role='employee'").fetchone()["c"]
-        manager = conn.execute(
-            "SELECT * FROM users WHERE username='manager'").fetchone()
+            "SELECT COUNT(*) c FROM users WHERE role='employee'"
+        ).fetchone()["c"]
+        manager = conn.execute("SELECT * FROM users WHERE username='manager'").fetchone()
         shift_count = conn.execute("SELECT COUNT(*) c FROM shifts").fetchone()["c"]
         conn.close()
 

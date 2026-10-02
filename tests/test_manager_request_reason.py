@@ -27,12 +27,11 @@ def test_manager_denial_reason_is_saved_and_sent_to_employee(isolated_db):
     )
     assert response.status_code == 200
     conn = appmod.db()
-    saved = conn.execute(
-        "SELECT status, reason FROM requests WHERE id=?", (request_id,)
-    ).fetchone()
+    saved = conn.execute("SELECT status, reason FROM requests WHERE id=?", (request_id,)).fetchone()
     notification = conn.execute(
         "SELECT message FROM notifications WHERE user_id=? AND kind='conflict' "
-        "ORDER BY id DESC LIMIT 1", (alex_id,),
+        "ORDER BY id DESC LIMIT 1",
+        (alex_id,),
     ).fetchone()
     conn.close()
     assert saved["status"] == "denied"

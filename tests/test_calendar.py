@@ -1,16 +1,19 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import app as appmod
 from test_support import isolate_database
+
+import app as appmod
+
+
 def test_calendar():
     _test_db = isolate_database(appmod)
     try:
-        WEEK = "2026-09-28"   # a Monday
+        WEEK = "2026-09-28"  # a Monday
         DB = appmod.DB_PATH
         if DB.exists():
             DB.unlink()
@@ -19,10 +22,14 @@ def test_calendar():
         conn.execute("DELETE FROM shifts")
         rows = [(WEEK, d, "09:00", "17:00", 2) for d in ("Mon", "Wed", "Fri")]
         conn.executemany(
-            "INSERT INTO shifts (week_start, day, start_time, end_time, slots) VALUES (?,?,?,?,?)", rows)
+            "INSERT INTO shifts (week_start, day, start_time, end_time, slots) VALUES (?,?,?,?,?)",
+            rows,
+        )
         conn.execute(
             "INSERT INTO shifts (week_start, day, start_time, end_time, slots, area) "
-            "VALUES (?,?,?,?,?,?)", (WEEK, "Sun", "10:00", "18:00", 1, "back"))
+            "VALUES (?,?,?,?,?,?)",
+            (WEEK, "Sun", "10:00", "18:00", 1, "back"),
+        )
         conn.commit()
 
         # assign Mon to alex, Wed to sam so the calendar has content
@@ -68,7 +75,7 @@ def test_calendar():
         # --- 5. manager can view another employee's calendar
         client.post("/logout")
         client.post("/login", data={"username": "manager", "password": "manager"})
-        r5 = client.get("/calendar?user_id=3")   # sam
+        r5 = client.get("/calendar?user_id=3")  # sam
         html5 = r5.data.decode()
         assert r5.status_code == 200
         assert "Sam Chen" in html5 and "— view employee —" in html5
@@ -103,7 +110,7 @@ def test_calendar():
         assert front_manager.status_code == back_manager.status_code == 200
         assert "Alex Rivera" in front_html and "Jordan Diaz" not in front_html
         assert "Jordan Diaz" in back_html and "Alex Rivera" not in back_html
-        assert "id=\"3\"" not in back_html, "front employee should not be selected in BOH view"
+        assert 'id="3"' not in back_html, "front employee should not be selected in BOH view"
         print("8. Manager employee picker only lists employees from selected house: OK")
 
         print("\nALL CALENDAR TESTS PASSED")

@@ -1,4 +1,5 @@
 """Sign-in throttling and username-enumeration resistance."""
+
 import sys
 import tempfile
 import unittest
@@ -26,14 +27,16 @@ class LoginThrottleTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def attempt(self, username, password):
-        return self.client.post("/login",
-                                data={"username": username, "password": password},
-                                follow_redirects=True)
+        return self.client.post(
+            "/login", data={"username": username, "password": password}, follow_redirects=True
+        )
 
     def expire_lock(self):
         conn = appmod.db()
-        conn.execute("UPDATE login_attempts SET locked_until=?",
-                     ((datetime.now() - timedelta(seconds=1)).isoformat(),))
+        conn.execute(
+            "UPDATE login_attempts SET locked_until=?",
+            ((datetime.now() - timedelta(seconds=1)).isoformat(),),
+        )
         conn.commit()
         conn.close()
 
@@ -53,8 +56,9 @@ class LoginThrottleTests(unittest.TestCase):
         self.assertIn(b"Log out", self.attempt("alex", "alex").data)
 
     def test_unknown_username_is_hashed_anyway(self):
-        with patch("shiftwise.auth.check_password_hash",
-                   side_effect=appmod.check_password_hash) as verify:
+        with patch(
+            "shiftwise.auth.check_password_hash", side_effect=appmod.check_password_hash
+        ) as verify:
             self.attempt("ghost", "wrong-password")
         self.assertEqual(verify.call_count, 1)
 

@@ -4,6 +4,7 @@ Runs the ShiftWise application configured for LAN testing with mock data.
 Listens on 0.0.0.0:5001 with an isolated mock database.
 Also re-exports root app symbols for backward compatibility with existing scripts.
 """
+
 import os
 import sys
 from pathlib import Path

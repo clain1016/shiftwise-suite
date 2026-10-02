@@ -1,12 +1,13 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import app as appmod
 from test_support import isolate_database
+
+import app as appmod
 
 
 def test_days_off():
@@ -31,24 +32,29 @@ def test_days_off():
         def shift(conn, day):
             return conn.execute(
                 "INSERT INTO shifts (week_start, day, start_time, end_time, slots) VALUES (?,?,?,?,?)",
-                (WEEK, day, "09:00", "17:00", 3)).lastrowid
+                (WEEK, day, "09:00", "17:00", 3),
+            ).lastrowid
 
         def pick(conn, username, sid, rank):
             uid = conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()[0]
-            conn.execute("INSERT OR REPLACE INTO picks (user_id, shift_id, rank) VALUES (?,?,?)",
-                         (uid, sid, rank))
+            conn.execute(
+                "INSERT OR REPLACE INTO picks (user_id, shift_id, rank) VALUES (?,?,?)",
+                (uid, sid, rank),
+            )
 
         def days_for(conn, username):
             rows = conn.execute(
                 "SELECT s.day FROM assignments a JOIN users u ON u.id=a.user_id "
-                "JOIN shifts s ON s.id=a.shift_id WHERE u.username=?", (username,)).fetchall()
+                "JOIN shifts s ON s.id=a.shift_id WHERE u.username=?",
+                (username,),
+            ).fetchall()
             return {r["day"] for r in rows}
 
         # --- 1. employee with picks on all 7 days gets at most 5 working days
         conn = fresh(overrides=[("alex", "weekly_hours", 80)])
         ids = {d: shift(conn, d) for d in ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")}
         for i, d in enumerate(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"), 1):
-            pick(conn, "alex", ids[d], i)   # FT, plenty of cap: would take all 7
+            pick(conn, "alex", ids[d], i)  # FT, plenty of cap: would take all 7
         conn.commit()
         appmod.run_scheduler(WEEK)
         conn = appmod.db()
@@ -69,7 +75,8 @@ def test_days_off():
         d_devon = days_for(conn, "alex")
         note = conn.execute(
             "SELECT message FROM notifications n JOIN users u ON u.id=n.user_id "
-            "WHERE u.username='alex' AND message LIKE '%days off%'").fetchall()
+            "WHERE u.username='alex' AND message LIKE '%days off%'"
+        ).fetchall()
         conn.close()
         assert len(d_devon) == 5, f"expected 5 days, got {len(d_devon)}"
         assert note, "expected a days-off notification"
@@ -79,43 +86,52 @@ def test_days_off():
         conn = fresh(overrides=[("alex", "weekly_hours", 60)])
         m1 = conn.execute(
             "INSERT INTO shifts (week_start, day, start_time, end_time, slots) VALUES (?,?,?,?,?)",
-            (WEEK, "Mon", "07:00", "15:00", 3)).lastrowid
+            (WEEK, "Mon", "07:00", "15:00", 3),
+        ).lastrowid
         m2 = conn.execute(
             "INSERT INTO shifts (week_start, day, start_time, end_time, slots) VALUES (?,?,?,?,?)",
-            (WEEK, "Mon", "15:00", "23:00", 3)).lastrowid
+            (WEEK, "Mon", "15:00", "23:00", 3),
+        ).lastrowid
         t = conn.execute(
             "INSERT INTO shifts (week_start, day, start_time, end_time, slots) VALUES (?,?,?,?,?)",
-            (WEEK, "Tue", "09:00", "17:00", 3)).lastrowid
+            (WEEK, "Tue", "09:00", "17:00", 3),
+        ).lastrowid
         w = conn.execute(
             "INSERT INTO shifts (week_start, day, start_time, end_time, slots) VALUES (?,?,?,?,?)",
-            (WEEK, "Wed", "09:00", "17:00", 3)).lastrowid
+            (WEEK, "Wed", "09:00", "17:00", 3),
+        ).lastrowid
         th = conn.execute(
             "INSERT INTO shifts (week_start, day, start_time, end_time, slots) VALUES (?,?,?,?,?)",
-            (WEEK, "Thu", "09:00", "17:00", 3)).lastrowid
+            (WEEK, "Thu", "09:00", "17:00", 3),
+        ).lastrowid
         f = conn.execute(
             "INSERT INTO shifts (week_start, day, start_time, end_time, slots) VALUES (?,?,?,?,?)",
-            (WEEK, "Fri", "09:00", "17:00", 3)).lastrowid
+            (WEEK, "Fri", "09:00", "17:00", 3),
+        ).lastrowid
         pick(conn, "alex", m1, 1)
         pick(conn, "alex", t, 2)
         pick(conn, "alex", w, 3)
         pick(conn, "alex", th, 4)
         pick(conn, "alex", f, 5)
-        pick(conn, "alex", m2, 6)   # second Monday shift: same day, 60h cap allows
+        pick(conn, "alex", m2, 6)  # second Monday shift: same day, 60h cap allows
         conn.commit()
         appmod.run_scheduler(WEEK)
         conn = appmod.db()
         d_alex = days_for(conn, "alex")
         n_shifts = conn.execute(
             "SELECT COUNT(*) c FROM assignments a JOIN users u ON u.id=a.user_id "
-            "WHERE u.username='alex'").fetchone()["c"]
+            "WHERE u.username='alex'"
+        ).fetchone()["c"]
         conn.close()
-        assert len(d_alex) == 5 and n_shifts == 6, \
+        assert len(d_alex) == 5 and n_shifts == 6, (
             f"double-Monday should be allowed within 5 distinct days (6 shifts), got {n_shifts} on {d_alex}"
+        )
         print("3. Two shifts on the same day = 1 working day (double allowed): OK")
 
         # --- 4. days-off rule beats hours cap interplay: PT with high cap still limited to 5 days
-        conn = fresh(overrides=[("sam", "employment_type", "part_time"),
-                                ("sam", "weekly_hours", 80)])
+        conn = fresh(
+            overrides=[("sam", "employment_type", "part_time"), ("sam", "weekly_hours", 80)]
+        )
         ids = {d: shift(conn, d) for d in ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")}
         for i, d in enumerate(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"), 1):
             pick(conn, "sam", ids[d], i)

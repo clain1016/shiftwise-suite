@@ -34,8 +34,7 @@ def test_clock_format_defaults_to_existing_24_hour_display(isolated_db):
     conn = appmod.db()
     conn.execute(
         "INSERT INTO users (username, password, name, role, station) VALUES (?,?,?,?,?)",
-        (username, appmod.generate_password_hash(username),
-         "Clock Test", "employee", "front"),
+        (username, appmod.generate_password_hash(username), "Clock Test", "employee", "front"),
     )
     conn.execute(
         "INSERT INTO shifts (week_start, day, start_time, end_time, slots, area) "
@@ -49,9 +48,7 @@ def test_clock_format_defaults_to_existing_24_hour_display(isolated_db):
 
     response = client.get("/")
     conn = appmod.db()
-    row = conn.execute(
-        "SELECT time_format FROM users WHERE username=?", (username,)
-    ).fetchone()
+    row = conn.execute("SELECT time_format FROM users WHERE username=?", (username,)).fetchone()
     conn.close()
 
     assert row["time_format"] == "24h"
@@ -77,9 +74,7 @@ def test_user_can_save_12_hour_clock_format(isolated_db):
     response = client.post("/settings", data={"time_format": "12h"}, follow_redirects=True)
 
     conn = appmod.db()
-    row = conn.execute(
-        "SELECT time_format FROM users WHERE username='alex'"
-    ).fetchone()
+    row = conn.execute("SELECT time_format FROM users WHERE username='alex'").fetchone()
     conn.close()
     assert response.status_code == 200
     assert row["time_format"] == "12h"
@@ -96,13 +91,10 @@ def test_invalid_clock_format_does_not_change_saved_preference(isolated_db):
     _login(client)
     client.post("/settings", data={"time_format": "12h"}, follow_redirects=True)
 
-    response = client.post("/settings", data={"time_format": "wall-clock"},
-                           follow_redirects=True)
+    response = client.post("/settings", data={"time_format": "wall-clock"}, follow_redirects=True)
 
     conn = appmod.db()
-    row = conn.execute(
-        "SELECT time_format FROM users WHERE username='alex'"
-    ).fetchone()
+    row = conn.execute("SELECT time_format FROM users WHERE username='alex'").fetchone()
     conn.close()
     assert response.status_code == 200
     assert row["time_format"] == "12h"
@@ -126,7 +118,6 @@ def test_clock_formatter_handles_noon_midnight_and_afternoon(isolated_db):
     page = client.get("/").data
     assert b"12:00 AM" in page
     assert b"12:00 PM" in page
-
 
     assert format_clock("13:05", "24h") == "13:05"
     assert format_clock("not-a-time", "12h") == "not-a-time"
@@ -152,8 +143,7 @@ def test_general_settings_page_contains_account_controls(isolated_db):
     response = client.get("/settings")
 
     assert response.status_code == 200
-    for label in (b"Display name", b"Username", b"Email", b"Current password",
-                  b"New password"):
+    for label in (b"Display name", b"Username", b"Email", b"Current password", b"New password"):
         assert label in response.data
 
 
@@ -162,15 +152,22 @@ def test_user_can_update_profile_from_general_settings(isolated_db):
     client = appmod.app.test_client()
     _login(client)
 
-    response = client.post("/settings", data={
-        "action": "profile", "name": "Alex Updated", "username": "alex_updated",
-        "email": "alex.updated@example.test",
-    }, follow_redirects=True)
+    response = client.post(
+        "/settings",
+        data={
+            "action": "profile",
+            "name": "Alex Updated",
+            "username": "alex_updated",
+            "email": "alex.updated@example.test",
+        },
+        follow_redirects=True,
+    )
 
     conn = appmod.db()
     row = conn.execute(
         "SELECT name, username, email FROM users WHERE id=(SELECT id FROM users "
-        "WHERE username='alex_updated')").fetchone()
+        "WHERE username='alex_updated')"
+    ).fetchone()
     conn.close()
     assert response.status_code == 200
     assert row is not None
@@ -178,9 +175,16 @@ def test_user_can_update_profile_from_general_settings(isolated_db):
     assert b"Alex Updated" in response.data
     assert client.get("/settings").status_code == 200
     client.get("/logout")
-    assert client.post("/login", data={
-        "username": "alex_updated", "password": "alex",
-    }).status_code == 302
+    assert (
+        client.post(
+            "/login",
+            data={
+                "username": "alex_updated",
+                "password": "alex",
+            },
+        ).status_code
+        == 302
+    )
 
 
 def test_profile_rejects_duplicate_username_and_invalid_email(isolated_db):
@@ -188,18 +192,29 @@ def test_profile_rejects_duplicate_username_and_invalid_email(isolated_db):
     client = appmod.app.test_client()
     _login(client)
 
-    duplicate = client.post("/settings", data={
-        "action": "profile", "name": "Alex Rivera", "username": "sam",
-        "email": "alex@example.test",
-    }, follow_redirects=True)
-    invalid_email = client.post("/settings", data={
-        "action": "profile", "name": "Alex Rivera", "username": "alex",
-        "email": "not-an-email",
-    }, follow_redirects=True)
+    duplicate = client.post(
+        "/settings",
+        data={
+            "action": "profile",
+            "name": "Alex Rivera",
+            "username": "sam",
+            "email": "alex@example.test",
+        },
+        follow_redirects=True,
+    )
+    invalid_email = client.post(
+        "/settings",
+        data={
+            "action": "profile",
+            "name": "Alex Rivera",
+            "username": "alex",
+            "email": "not-an-email",
+        },
+        follow_redirects=True,
+    )
 
     conn = appmod.db()
-    row = conn.execute(
-        "SELECT name, username, email FROM users WHERE username='alex'").fetchone()
+    row = conn.execute("SELECT name, username, email FROM users WHERE username='alex'").fetchone()
     conn.close()
     assert b"already in use" in duplicate.data
     assert b"valid email" in invalid_email.data
@@ -215,9 +230,16 @@ def test_profile_can_clear_optional_email(isolated_db):
     client = appmod.app.test_client()
     _login(client)
 
-    response = client.post("/settings", data={
-        "action": "profile", "name": "Alex Rivera", "username": "alex", "email": "",
-    }, follow_redirects=True)
+    response = client.post(
+        "/settings",
+        data={
+            "action": "profile",
+            "name": "Alex Rivera",
+            "username": "alex",
+            "email": "",
+        },
+        follow_redirects=True,
+    )
 
     conn = appmod.db()
     email = conn.execute("SELECT email FROM users WHERE username='alex'").fetchone()["email"]
@@ -231,14 +253,20 @@ def test_user_can_change_password_from_general_settings(isolated_db):
     client = appmod.app.test_client()
     _login(client)
 
-    response = client.post("/settings", data={
-        "action": "password", "current_password": "alex",
-        "new_password": "a-new-secure-password",
-    }, follow_redirects=True)
+    response = client.post(
+        "/settings",
+        data={
+            "action": "password",
+            "current_password": "alex",
+            "new_password": "a-new-secure-password",
+        },
+        follow_redirects=True,
+    )
 
     conn = appmod.db()
-    password = conn.execute(
-        "SELECT password FROM users WHERE username='alex'").fetchone()["password"]
+    password = conn.execute("SELECT password FROM users WHERE username='alex'").fetchone()[
+        "password"
+    ]
     conn.close()
     assert response.status_code == 200
     assert b"Password changed" in response.data
@@ -246,9 +274,16 @@ def test_user_can_change_password_from_general_settings(isolated_db):
     assert client.get("/settings").status_code == 302
     old_login = client.post("/login", data={"username": "alex", "password": "alex"})
     assert b"Wrong username or password" in old_login.data
-    assert client.post("/login", data={
-        "username": "alex", "password": "a-new-secure-password",
-    }).status_code == 302
+    assert (
+        client.post(
+            "/login",
+            data={
+                "username": "alex",
+                "password": "a-new-secure-password",
+            },
+        ).status_code
+        == 302
+    )
 
 
 def test_password_change_rejects_wrong_current_and_short_new_password(isolated_db):
@@ -256,17 +291,29 @@ def test_password_change_rejects_wrong_current_and_short_new_password(isolated_d
     client = appmod.app.test_client()
     _login(client)
 
-    wrong_current = client.post("/settings", data={
-        "action": "password", "current_password": "wrong",
-        "new_password": "a-new-secure-password",
-    }, follow_redirects=True)
-    short_password = client.post("/settings", data={
-        "action": "password", "current_password": "alex", "new_password": "short",
-    }, follow_redirects=True)
+    wrong_current = client.post(
+        "/settings",
+        data={
+            "action": "password",
+            "current_password": "wrong",
+            "new_password": "a-new-secure-password",
+        },
+        follow_redirects=True,
+    )
+    short_password = client.post(
+        "/settings",
+        data={
+            "action": "password",
+            "current_password": "alex",
+            "new_password": "short",
+        },
+        follow_redirects=True,
+    )
 
     conn = appmod.db()
-    password = conn.execute(
-        "SELECT password FROM users WHERE username='alex'").fetchone()["password"]
+    password = conn.execute("SELECT password FROM users WHERE username='alex'").fetchone()[
+        "password"
+    ]
     conn.close()
     assert b"Current password is incorrect" in wrong_current.data
     assert b"at least 12 characters" in short_password.data
@@ -281,8 +328,10 @@ def test_settings_is_last_in_desktop_and_mobile_navigation(isolated_db):
     response = client.get("/settings")
     html = response.data.decode()
     desktop_links = html.split('<div class="links">', 1)[1].split("</div>", 1)[0]
-    mobile_menu = html.split('<div class="mobile-menu" id="mobileMenu">', 1)[1].split("<script>", 1)[0]
-    last_mobile_link = mobile_menu[mobile_menu.rfind("<a "):].split("</a>", 1)[0]
+    mobile_menu = html.split('<div class="mobile-menu" id="mobileMenu">', 1)[1].split(
+        "<script>", 1
+    )[0]
+    last_mobile_link = mobile_menu[mobile_menu.rfind("<a ") :].split("</a>", 1)[0]
 
     assert desktop_links.rfind("Settings") > desktop_links.rfind("My requests")
     assert "Settings" in last_mobile_link
@@ -291,8 +340,9 @@ def test_settings_is_last_in_desktop_and_mobile_navigation(isolated_db):
     client.post("/login", data={"username": "manager", "password": "manager"})
     manager_html = client.get("/settings").data.decode()
     manager_desktop = manager_html.split('<div class="links">', 1)[1].split("</div>", 1)[0]
-    manager_mobile = manager_html.split(
-        '<div class="mobile-menu" id="mobileMenu">', 1)[1].split("<script>", 1)[0]
-    manager_last_mobile_link = manager_mobile[manager_mobile.rfind("<a "):].split("</a>", 1)[0]
+    manager_mobile = manager_html.split('<div class="mobile-menu" id="mobileMenu">', 1)[1].split(
+        "<script>", 1
+    )[0]
+    manager_last_mobile_link = manager_mobile[manager_mobile.rfind("<a ") :].split("</a>", 1)[0]
     assert manager_desktop.rfind("Settings") > manager_desktop.rfind("Roster")
     assert "Settings" in manager_last_mobile_link

@@ -1,4 +1,5 @@
 """ShiftWise database connection, schema, and lifecycle management."""
+
 import atexit
 import os
 import re
@@ -205,8 +206,7 @@ def _split_ddl(schema):
                 current.extend((char, ahead))
                 index += 1
             elif char == "$":
-                tag_match = re.match(r"\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$",
-                                     schema[index:])
+                tag_match = re.match(r"\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$", schema[index:])
                 if tag_match:
                     dollar_tag = tag_match.group(0)
                     state = "dollar"
@@ -279,9 +279,7 @@ def _database_engine():
                     "DATABASE_URL is required when SHIFTWISE_DB_ENGINE selects PostgreSQL"
                 )
             return "postgres"
-        raise ValueError(
-            "SHIFTWISE_DB_ENGINE must be one of: sqlite, postgres, postgresql"
-        )
+        raise ValueError("SHIFTWISE_DB_ENGINE must be one of: sqlite, postgres, postgresql")
 
     database_url = os.environ.get("DATABASE_URL", "")
     if database_url.lower().startswith(("postgres://", "postgresql://")):
@@ -373,8 +371,7 @@ class _PostgresRow(dict):
     def __init__(self, values, description):
         self._values = tuple(values)
         names = tuple(
-            column.name if hasattr(column, "name") else column[0]
-            for column in description
+            column.name if hasattr(column, "name") else column[0] for column in description
         )
         super().__init__(zip(names, self._values))
 
@@ -504,7 +501,10 @@ def _postgres_pool_for(database_url):
             from psycopg_pool import ConnectionPool
 
             pool = ConnectionPool(
-                conninfo=database_url, min_size=4, max_size=20, open=False,
+                conninfo=database_url,
+                min_size=4,
+                max_size=20,
+                open=False,
                 # Defensive server-side timeouts: a hung or runaway query
                 # must not hold a pooled worker (or its locks) forever. The
                 # review caught `idle in transaction (aborted)` holders
@@ -596,8 +596,11 @@ def _ensure_passwords_hashed(conn, seed_demo):
                     "Set SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD (at least 12 characters) "
                     "to replace the demo manager password"
                 )
-        execute_sql(conn, "UPDATE users SET password=? WHERE id=?",
-                    (generate_password_hash(password), user[0]))
+        execute_sql(
+            conn,
+            "UPDATE users SET password=? WHERE id=?",
+            (generate_password_hash(password), user[0]),
+        )
 
 
 def _seed_if_empty(conn, seed_demo, mock_roster):
@@ -609,10 +612,14 @@ def _seed_if_empty(conn, seed_demo, mock_roster):
     if execute_sql(conn, "SELECT 1 FROM users LIMIT 1").fetchone():
         return False
     bootstrap_password = os.environ.get("SHIFTWISE_BOOTSTRAP_MANAGER_PASSWORD")
-    if mock_roster or seed_demo in ("8", "mock", 8) or (
-            seed_demo and os.environ.get("SHIFTWISE_DEMO_SEED") in ("1", "8", "mock")):
+    if (
+        mock_roster
+        or seed_demo in ("8", "mock", 8)
+        or (seed_demo and os.environ.get("SHIFTWISE_DEMO_SEED") in ("1", "8", "mock"))
+    ):
         conn.close()
         import mock_seed
+
         target_mod = sys.modules.get("app") or sys.modules[__name__]
         mock_seed.seed(target_mod, force=True)
         return True
@@ -627,27 +634,91 @@ def _seed_if_empty(conn, seed_demo, mock_roster):
             conn,
             "INSERT INTO users (username, password, name, role, weekly_hours, "
             "employment_type, station) VALUES (?,?,?,?,?,?,?)",
-            ("manager", generate_password_hash(bootstrap_password),
-             "Store Manager", "manager", 40, "full_time", "front"))
+            (
+                "manager",
+                generate_password_hash(bootstrap_password),
+                "Store Manager",
+                "manager",
+                40,
+                "full_time",
+                "front",
+            ),
+        )
     else:
         conn.executemany(
             "INSERT INTO users (username, password, name, role, weekly_hours,"
             " employment_type, hired_on, station) VALUES (?,?,?,?,?,?,?,?)",
             [
-                ("manager", generate_password_hash("manager"),
-                 "Store Manager", "manager", 40, "full_time", "2020-01-15", "front"),
-                ("alex", generate_password_hash("alex"),
-                 "Alex Rivera", "employee", 30, "full_time", "2021-03-01", "front"),
-                ("sam", generate_password_hash("sam"),
-                 "Sam Chen", "employee", 25, "part_time", "2023-06-10", "front"),
-                ("taylor", generate_password_hash("taylor"),
-                 "Taylor Brooks", "employee", 20, "part_time", "2025-02-11", "front"),
-                ("jordan", generate_password_hash("jordan"),
-                 "Jordan Diaz", "employee", 35, "part_time", "2024-11-20", "back"),
-                ("casey", generate_password_hash("casey"),
-                 "Casey Boots", "employee", 35, "part_time", "2023-05-01", "back"),
-                ("morgan", generate_password_hash("morgan"),
-                 "Morgan Vale", "employee", 40, "full_time", "2022-08-15", "back"),
+                (
+                    "manager",
+                    generate_password_hash("manager"),
+                    "Store Manager",
+                    "manager",
+                    40,
+                    "full_time",
+                    "2020-01-15",
+                    "front",
+                ),
+                (
+                    "alex",
+                    generate_password_hash("alex"),
+                    "Alex Rivera",
+                    "employee",
+                    30,
+                    "full_time",
+                    "2021-03-01",
+                    "front",
+                ),
+                (
+                    "sam",
+                    generate_password_hash("sam"),
+                    "Sam Chen",
+                    "employee",
+                    25,
+                    "part_time",
+                    "2023-06-10",
+                    "front",
+                ),
+                (
+                    "taylor",
+                    generate_password_hash("taylor"),
+                    "Taylor Brooks",
+                    "employee",
+                    20,
+                    "part_time",
+                    "2025-02-11",
+                    "front",
+                ),
+                (
+                    "jordan",
+                    generate_password_hash("jordan"),
+                    "Jordan Diaz",
+                    "employee",
+                    35,
+                    "part_time",
+                    "2024-11-20",
+                    "back",
+                ),
+                (
+                    "casey",
+                    generate_password_hash("casey"),
+                    "Casey Boots",
+                    "employee",
+                    35,
+                    "part_time",
+                    "2023-05-01",
+                    "back",
+                ),
+                (
+                    "morgan",
+                    generate_password_hash("morgan"),
+                    "Morgan Vale",
+                    "employee",
+                    40,
+                    "full_time",
+                    "2022-08-15",
+                    "back",
+                ),
             ],
         )
         week = monday_of(date.today()).isoformat()
@@ -669,7 +740,9 @@ def _seed_if_empty(conn, seed_demo, mock_roster):
         ]
         conn.executemany(
             "INSERT INTO shifts (week_start, day, start_time, end_time, slots, note, area) "
-            "VALUES (?,?,?,?,?,?,?)", demo)
+            "VALUES (?,?,?,?,?,?,?)",
+            demo,
+        )
     return False
 
 
@@ -725,23 +798,21 @@ def _init_db_sqlite(seed_demo=False, mock_roster=False):
     cols = [r[1] for r in conn.execute("PRAGMA table_info(users)")]
     if "employment_type" not in cols:
         conn.execute(
-            "ALTER TABLE users ADD COLUMN employment_type TEXT NOT NULL DEFAULT 'part_time'")
+            "ALTER TABLE users ADD COLUMN employment_type TEXT NOT NULL DEFAULT 'part_time'"
+        )
     if "hired_on" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN hired_on TEXT")
     if "station" not in cols:
-        conn.execute(
-            "ALTER TABLE users ADD COLUMN station TEXT NOT NULL DEFAULT 'front'")
+        conn.execute("ALTER TABLE users ADD COLUMN station TEXT NOT NULL DEFAULT 'front'")
     if "email" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
     if "phone" not in cols:
         conn.execute("ALTER TABLE users ADD COLUMN phone TEXT")
     if "time_format" not in cols:
-        conn.execute(
-            "ALTER TABLE users ADD COLUMN time_format TEXT NOT NULL DEFAULT '24h'")
+        conn.execute("ALTER TABLE users ADD COLUMN time_format TEXT NOT NULL DEFAULT '24h'")
     scols = [r[1] for r in conn.execute("PRAGMA table_info(shifts)")]
     if "area" not in scols:
-        conn.execute(
-            "ALTER TABLE shifts ADD COLUMN area TEXT NOT NULL DEFAULT 'front'")
+        conn.execute("ALTER TABLE shifts ADD COLUMN area TEXT NOT NULL DEFAULT 'front'")
     rcols = [r[1] for r in conn.execute("PRAGMA table_info(requests)")]
     if "vacation_start" not in rcols:
         conn.execute("ALTER TABLE requests ADD COLUMN vacation_start TEXT")

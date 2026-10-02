@@ -1,6 +1,6 @@
 import importlib
-import os
 import sqlite3
+
 import pytest
 
 import app
@@ -49,24 +49,39 @@ def test_database_engine_selection(monkeypatch):
     # tests/test_postgres_phase2.py using a stubbed backend.
     monkeypatch.setenv("SHIFTWISE_DB_ENGINE", "postgres")
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/testdb")
-    monkeypatch.setattr(sdb, "db", lambda: (_ for _ in ()).throw(
-        AssertionError("stubbed in test_postgres_phase2.py")))
+    monkeypatch.setattr(
+        sdb,
+        "db",
+        lambda: (_ for _ in ()).throw(AssertionError("stubbed in test_postgres_phase2.py")),
+    )
     with pytest.raises(AssertionError, match="stubbed in test_postgres_phase2"):
         sdb.init_db()
 
 
 def test_qmark_to_psycopg_translation():
     # Simple substitution
-    assert sdb._qmark_to_psycopg("SELECT * FROM users WHERE id = ?") == "SELECT * FROM users WHERE id = %s"
-    assert sdb._qmark_to_psycopg("INSERT INTO t (a, b) VALUES (?, ?)") == "INSERT INTO t (a, b) VALUES (%s, %s)"
+    assert (
+        sdb._qmark_to_psycopg("SELECT * FROM users WHERE id = ?")
+        == "SELECT * FROM users WHERE id = %s"
+    )
+    assert (
+        sdb._qmark_to_psycopg("INSERT INTO t (a, b) VALUES (?, ?)")
+        == "INSERT INTO t (a, b) VALUES (%s, %s)"
+    )
 
     # String literals preserving question marks
     sql_with_string = "SELECT * FROM users WHERE note = 'why?' AND id = ?"
-    assert sdb._qmark_to_psycopg(sql_with_string) == "SELECT * FROM users WHERE note = 'why?' AND id = %s"
+    assert (
+        sdb._qmark_to_psycopg(sql_with_string)
+        == "SELECT * FROM users WHERE note = 'why?' AND id = %s"
+    )
 
     # Escaped quotes inside string literals
     sql_escaped_quote = "SELECT * FROM users WHERE note = 'O''Reilly ?' AND id = ?"
-    assert sdb._qmark_to_psycopg(sql_escaped_quote) == "SELECT * FROM users WHERE note = 'O''Reilly ?' AND id = %s"
+    assert (
+        sdb._qmark_to_psycopg(sql_escaped_quote)
+        == "SELECT * FROM users WHERE note = 'O''Reilly ?' AND id = %s"
+    )
 
     # Double-quoted identifiers preserving question marks
     sql_double_quote = 'SELECT "col?" FROM t WHERE id = ?'

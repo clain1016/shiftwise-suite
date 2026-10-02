@@ -65,3 +65,10 @@
 - **Context Manager Facades:**
   - Facades wrapping connections and cursors must implement `__enter__` returning `self` (the facade), ensuring that parameter translations (e.g. `?` to `%s`) remain active within `with conn:` and `with cur:` blocks.
 
+## 8. Lint & Format (ruff)
+
+- `pyproject.toml` configures ruff: `line-length = 100`, `target-version = "py312"`, rules `F`, `E4`, `E7`, `E9`, `I` (import sorting).
+- Before opening a PR, run `ruff check` and `ruff format --check` from the repo root; both must be clean.
+- The per-file ignores in `pyproject.toml` are deliberate and documented there — do not "fix" them away:
+  - `app.py`: the §2 monkeypatch facade (`DB_PATH` in `__all__` resolving via the proxy, importlib-first import ordering).
+  - `tools/*.py`, `tests/*.py`, `shiftwise-mock/app.py`: `sys.path` bootstrap before imports (E402).

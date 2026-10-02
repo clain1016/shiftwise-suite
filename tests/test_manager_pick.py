@@ -1,12 +1,13 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import app as appmod
 from test_support import isolate_database
+
+import app as appmod
 
 
 def test_manager_pick():
@@ -59,7 +60,8 @@ def test_manager_pick():
         conn = appmod.db()
         status = conn.execute(
             "SELECT a.status FROM assignments a JOIN users u ON u.id=a.user_id "
-            "WHERE u.username='alex' AND a.shift_id=1").fetchone()
+            "WHERE u.username='alex' AND a.shift_id=1"
+        ).fetchone()
         conn.close()
         assert status and status["status"] in ("proposed", "notified"), status
         print("4. Employee pick flow unaffected: OK")

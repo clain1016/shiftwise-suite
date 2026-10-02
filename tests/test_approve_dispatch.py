@@ -1,13 +1,14 @@
-from pathlib import Path
 import sys
 from datetime import datetime
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import app as appmod
 from test_support import isolate_database
+
+import app as appmod
 
 
 def test_approve_dispatch_vacation_and_swap():
@@ -24,8 +25,9 @@ def test_approve_dispatch_vacation_and_swap():
             DB.unlink()
         appmod.init_db(seed_demo=True)
         client = appmod.app.test_client()
-        r = client.post("/login", data={"username": "manager", "password": "manager"},
-                        follow_redirects=True)
+        r = client.post(
+            "/login", data={"username": "manager", "password": "manager"}, follow_redirects=True
+        )
         assert b"Log out" in r.data, "manager login failed"
 
         conn = appmod.db()
@@ -35,12 +37,16 @@ def test_approve_dispatch_vacation_and_swap():
         vid = conn.execute(
             "INSERT INTO requests (user_id, kind, vacation_start, vacation_end, "
             "status, created_at) VALUES (?, 'vacation', '2030-01-06', '2030-01-12', "
-            "'approved', ?)", (uid, now)).lastrowid
+            "'approved', ?)",
+            (uid, now),
+        ).lastrowid
         # Swap with no swap_requested assignment -> no eligible coverer path.
         shift_id = conn.execute("SELECT id FROM shifts LIMIT 1").fetchone()[0]
         sid = conn.execute(
             "INSERT INTO requests (user_id, kind, shift_id, status, created_at) "
-            "VALUES (?, 'swap', ?, 'approved', ?)", (uid, shift_id, now)).lastrowid
+            "VALUES (?, 'swap', ?, 'approved', ?)",
+            (uid, shift_id, now),
+        ).lastrowid
         conn.commit()
         conn.close()
 
@@ -52,8 +58,9 @@ def test_approve_dispatch_vacation_and_swap():
         assert st == "approved_ok", f"vacation status: {st}"
 
         r = client.post(f"/manager/requests/{sid}/approve", follow_redirects=True)
-        assert b"No eligible coverer is available for that swap." in r.data, \
+        assert b"No eligible coverer is available for that swap." in r.data, (
             "swap no-cover flash missing"
+        )
 
         print("vacation + swap approve dispatch: OK")
     finally:

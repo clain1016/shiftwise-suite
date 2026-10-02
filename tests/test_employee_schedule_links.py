@@ -34,11 +34,18 @@ class EmployeeScheduleLinkTests(unittest.TestCase):
 
     def test_roster_saves_employee_email_and_phone(self):
         uid = self.employee_id()
-        response = self.client.post("/manager/roster", data={
-            f"type_{uid}": "full_time", f"hired_{uid}": "2021-03-01",
-            f"cap_{uid}": "30", f"station_{uid}": "front",
-            f"email_{uid}": "alex@example.test", f"phone_{uid}": "+15551234567",
-        }, follow_redirects=True)
+        response = self.client.post(
+            "/manager/roster",
+            data={
+                f"type_{uid}": "full_time",
+                f"hired_{uid}": "2021-03-01",
+                f"cap_{uid}": "30",
+                f"station_{uid}": "front",
+                f"email_{uid}": "alex@example.test",
+                f"phone_{uid}": "+15551234567",
+            },
+            follow_redirects=True,
+        )
         self.assertIn(b"Roster updated", response.data)
         conn = appmod.db()
         row = conn.execute("SELECT email, phone FROM users WHERE id=?", (uid,)).fetchone()
@@ -47,16 +54,22 @@ class EmployeeScheduleLinkTests(unittest.TestCase):
         self.assertEqual(row["phone"], "+15551234567")
 
     def test_new_employee_can_be_added_with_contact_details(self):
-        response = self.client.post("/manager/roster/add", data={
-            "username": "newhire", "name": "New Hire",
-            "password": "a-private-long-password", "employment_type": "part_time",
-            "weekly_hours": "20", "email": "newhire@example.test",
-            "phone": "+15551234567",
-        }, follow_redirects=True)
+        response = self.client.post(
+            "/manager/roster/add",
+            data={
+                "username": "newhire",
+                "name": "New Hire",
+                "password": "a-private-long-password",
+                "employment_type": "part_time",
+                "weekly_hours": "20",
+                "email": "newhire@example.test",
+                "phone": "+15551234567",
+            },
+            follow_redirects=True,
+        )
         self.assertIn(b"Employee added", response.data)
         conn = appmod.db()
-        row = conn.execute(
-            "SELECT email, phone FROM users WHERE username='newhire'").fetchone()
+        row = conn.execute("SELECT email, phone FROM users WHERE username='newhire'").fetchone()
         conn.close()
         self.assertEqual(tuple(row), ("newhire@example.test", "+15551234567"))
 
@@ -73,33 +86,41 @@ class EmployeeScheduleLinkTests(unittest.TestCase):
         conn.execute("UPDATE users SET email=? WHERE id=?", ("alex@example.test", uid))
         conn.commit()
         conn.close()
-        with patch("shiftwise.routes.roster.send_schedule_link",
-                     return_value="email") as send:
+        with patch("shiftwise.routes.roster.send_schedule_link", return_value="email") as send:
             response = self.client.post(
-                f"/manager/roster/{uid}/send-link", data={"channel": "email"},
-                follow_redirects=True)
+                f"/manager/roster/{uid}/send-link", data={"channel": "email"}, follow_redirects=True
+            )
         self.assertIn(b"Schedule link sent by email", response.data)
-        send.assert_called_once_with("email", "alex@example.test", "Alex Rivera",
-                                     "https://staff.example.test/login")
+        send.assert_called_once_with(
+            "email", "alex@example.test", "Alex Rivera", "https://staff.example.test/login"
+        )
 
     def test_employee_cannot_send_schedule_link(self):
         uid = self.employee_id()
         self.client.get("/logout")
         self.client.post("/login", data={"username": "alex", "password": "alex"})
         with patch("shiftwise.routes.roster.send_schedule_link") as send:
-            response = self.client.post(f"/manager/roster/{uid}/send-link",
-                                        data={"channel": "email"})
+            response = self.client.post(
+                f"/manager/roster/{uid}/send-link", data={"channel": "email"}
+            )
         self.assertEqual(response.status_code, 403)
         send.assert_not_called()
 
     def test_email_delivery_uses_configured_smtp(self):
-        with patch.dict(os.environ, {
-                "SHIFTWISE_SMTP_HOST": "smtp.example.test",
-                "SHIFTWISE_SMTP_FROM": "schedule@example.test",
-                "SHIFTWISE_SMTP_PORT": "587"}), \
-                patch("shiftwise.notify._smtplib") as smtplib_mock:
-            appmod.send_schedule_link("email", "alex@example.test", "Alex",
-                                      "https://staff.example.test/login")
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "SHIFTWISE_SMTP_HOST": "smtp.example.test",
+                    "SHIFTWISE_SMTP_FROM": "schedule@example.test",
+                    "SHIFTWISE_SMTP_PORT": "587",
+                },
+            ),
+            patch("shiftwise.notify._smtplib") as smtplib_mock,
+        ):
+            appmod.send_schedule_link(
+                "email", "alex@example.test", "Alex", "https://staff.example.test/login"
+            )
         server = smtplib_mock.SMTP.return_value.__enter__.return_value
         server.starttls.assert_called_once_with()
         sent = server.send_message.call_args.args[0]
@@ -107,27 +128,42 @@ class EmployeeScheduleLinkTests(unittest.TestCase):
         self.assertIn("https://staff.example.test/login", sent.get_content())
 
     def test_text_delivery_uses_configured_twilio(self):
-        with patch.dict(os.environ, {
-                "SHIFTWISE_TWILIO_ACCOUNT_SID": "ACtest",
-                "SHIFTWISE_TWILIO_AUTH_TOKEN": "test-token",
-                "SHIFTWISE_TWILIO_FROM": "+15550000000"}), \
-                patch("shiftwise.notify._urllib.request.urlopen") as urlopen:
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "SHIFTWISE_TWILIO_ACCOUNT_SID": "ACtest",
+                    "SHIFTWISE_TWILIO_AUTH_TOKEN": "test-token",
+                    "SHIFTWISE_TWILIO_FROM": "+15550000000",
+                },
+            ),
+            patch("shiftwise.notify._urllib.request.urlopen") as urlopen,
+        ):
             urlopen.return_value.__enter__.return_value.status = 201
-            appmod.send_schedule_link("sms", "+15551234567", "Alex",
-                                      "https://staff.example.test/login")
+            appmod.send_schedule_link(
+                "sms", "+15551234567", "Alex", "https://staff.example.test/login"
+            )
         request_obj = urlopen.call_args.args[0]
-        self.assertIn("api.twilio.com/2010-04-01/Accounts/ACtest/Messages.json",
-                      request_obj.full_url)
+        self.assertIn(
+            "api.twilio.com/2010-04-01/Accounts/ACtest/Messages.json", request_obj.full_url
+        )
         body = urllib.parse.parse_qs(request_obj.data.decode())["Body"][0]
         self.assertIn("https://staff.example.test/login", body)
 
     def test_invalid_contact_details_are_rejected_when_saving_roster(self):
         uid = self.employee_id()
-        response = self.client.post("/manager/roster", data={
-            f"type_{uid}": "full_time", f"hired_{uid}": "2021-03-01",
-            f"cap_{uid}": "30", f"station_{uid}": "front",
-            f"email_{uid}": "not-an-email", f"phone_{uid}": "5551234567",
-        }, follow_redirects=True)
+        response = self.client.post(
+            "/manager/roster",
+            data={
+                f"type_{uid}": "full_time",
+                f"hired_{uid}": "2021-03-01",
+                f"cap_{uid}": "30",
+                f"station_{uid}": "front",
+                f"email_{uid}": "not-an-email",
+                f"phone_{uid}": "5551234567",
+            },
+            follow_redirects=True,
+        )
         self.assertIn(b"valid email address", response.data)
 
 

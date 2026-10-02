@@ -1,13 +1,14 @@
-from pathlib import Path
-from collections import defaultdict
 import sys
+from collections import defaultdict
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import app as appmod
 from test_support import isolate_database
+
+import app as appmod
 
 
 def test_flow():
@@ -22,7 +23,9 @@ def test_flow():
         client = appmod.app.test_client()
 
         def login(user, pw):
-            r = client.post("/login", data={"username": user, "password": pw}, follow_redirects=True)
+            r = client.post(
+                "/login", data={"username": user, "password": pw}, follow_redirects=True
+            )
             assert b"Log out" in r.data, f"login failed for {user}"
             return r
 
@@ -34,9 +37,33 @@ def test_flow():
 
         # --- 2. three employees each pick Mon rank1; Sat has 3 slots
         picks = {
-            "alex":   [("Mon", 1), ("Wed", 2), ("Thu", 3), ("Fri", 4), ("Sat", 5), ("Sun", 6), ("Tue", 7)],
-            "sam":    [("Mon", 1), ("Fri", 2), ("Sat", 3), ("Tue", 4), ("Wed", 5), ("Sun", 6), ("Thu", 7)],
-            "jordan": [("Mon", 1), ("Tue", 2), ("Sat", 3), ("Wed", 4), ("Thu", 5), ("Fri", 6), ("Sun", 7)],
+            "alex": [
+                ("Mon", 1),
+                ("Wed", 2),
+                ("Thu", 3),
+                ("Fri", 4),
+                ("Sat", 5),
+                ("Sun", 6),
+                ("Tue", 7),
+            ],
+            "sam": [
+                ("Mon", 1),
+                ("Fri", 2),
+                ("Sat", 3),
+                ("Tue", 4),
+                ("Wed", 5),
+                ("Sun", 6),
+                ("Thu", 7),
+            ],
+            "jordan": [
+                ("Mon", 1),
+                ("Tue", 2),
+                ("Sat", 3),
+                ("Wed", 4),
+                ("Thu", 5),
+                ("Fri", 6),
+                ("Sun", 7),
+            ],
         }
         for user, plist in picks.items():
             client.post("/logout")
@@ -45,7 +72,9 @@ def test_flow():
             conn = appmod.db()
             rows = conn.execute(
                 "SELECT id, day FROM shifts WHERE area="
-                "(SELECT station FROM users WHERE username=?)", (user,)).fetchall()
+                "(SELECT station FROM users WHERE username=?)",
+                (user,),
+            ).fetchall()
             conn.close()
             form = {}
             for day, rank in plist:
@@ -66,7 +95,8 @@ def test_flow():
         conn = appmod.db()
         rows = conn.execute(
             "SELECT s.day, u.name, a.status, s.area FROM assignments a "
-            "JOIN shifts s ON s.id=a.shift_id JOIN users u ON u.id=a.user_id ORDER BY s.id, u.name").fetchall()
+            "JOIN shifts s ON s.id=a.shift_id JOIN users u ON u.id=a.user_id ORDER BY s.id, u.name"
+        ).fetchall()
         conn.close()
         print("\nAssignments:")
         for r_ in rows:
@@ -77,7 +107,8 @@ def test_flow():
         conn = appmod.db()
         cross = conn.execute(
             "SELECT u.name FROM assignments a JOIN shifts s ON s.id=a.shift_id "
-            "JOIN users u ON u.id=a.user_id WHERE s.area!=u.station").fetchall()
+            "JOIN users u ON u.id=a.user_id WHERE s.area!=u.station"
+        ).fetchall()
         conn.close()
         assert not cross, f"cross-house assignments leaked: {[r['name'] for r in cross]}"
         print("FOH/BOH separation verified: nobody is scheduled across houses.")
@@ -93,8 +124,10 @@ def test_flow():
 
         # the loser of Mon should have gotten a conflict notification with an alternative
         conn = appmod.db()
-        conf = conn.execute("SELECT u.name, n.message FROM notifications n JOIN users u ON u.id=n.user_id "
-                            "WHERE kind='conflict'").fetchall()
+        conf = conn.execute(
+            "SELECT u.name, n.message FROM notifications n JOIN users u ON u.id=n.user_id "
+            "WHERE kind='conflict'"
+        ).fetchall()
         conn.close()
         print("\nConflict notifications:")
         for c in conf:
@@ -108,14 +141,20 @@ def test_flow():
         assert b"scheduled" in r.data, "employee dashboard should show 'scheduled' tag"
         # the confirm route must be gone
         r2 = client.post("/confirm/1", follow_redirects=True)
-        assert r2.status_code == 404 or b"Shift confirmed" not in r2.data, \
+        assert r2.status_code == 404 or b"Shift confirmed" not in r2.data, (
             "confirm route should no longer exist"
+        )
         sid_row = [x for x in rows if x["name"] == "Alex Rivera"][0]
         print(f"\nemployee dashboard OK; Alex sees {sid_row['day']} assignment, auto-scheduled")
 
-        sid = appmod.db().execute(
-            "SELECT s.id FROM assignments a JOIN shifts s ON s.id=a.shift_id "
-            "JOIN users u ON u.id=a.user_id WHERE u.name='Alex Rivera' LIMIT 1").fetchone()["id"]
+        sid = (
+            appmod.db()
+            .execute(
+                "SELECT s.id FROM assignments a JOIN shifts s ON s.id=a.shift_id "
+                "JOIN users u ON u.id=a.user_id WHERE u.name='Alex Rivera' LIMIT 1"
+            )
+            .fetchone()["id"]
+        )
 
         # --- 6. swap request: auto-covered when a house-mate has room, else
         # manager is alerted — either way the requester is relieved

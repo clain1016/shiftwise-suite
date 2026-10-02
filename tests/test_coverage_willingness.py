@@ -11,9 +11,12 @@ def test_employee_coverage_willingness_is_saved_and_honored(isolated_db):
 
     week = appmod.monday_of(date.today()).isoformat()
     conn = appmod.db()
-    shift_ids = [row["id"] for row in conn.execute(
-        "SELECT id FROM shifts WHERE week_start=? AND area='front' ORDER BY id", (week,)
-    )]
+    shift_ids = [
+        row["id"]
+        for row in conn.execute(
+            "SELECT id FROM shifts WHERE week_start=? AND area='front' ORDER BY id", (week,)
+        )
+    ]
     alex_id = conn.execute("SELECT id FROM users WHERE username='alex'").fetchone()["id"]
     conn.execute("UPDATE users SET station='back' WHERE role='employee' AND id!=?", (alex_id,))
     conn.commit()
@@ -64,23 +67,27 @@ def test_preferred_shift_ranking_matches_cover_availability_format(isolated_db):
     conn.execute("UPDATE users SET station='back' WHERE role='employee' AND id!=?", (alex_id,))
     conn.execute(
         "INSERT INTO shifts (week_start, day, start_time, end_time, slots, area) "
-        "VALUES (?, 'Mon', '11:00', '19:00', 1, 'front')", (week,),
+        "VALUES (?, 'Mon', '11:00', '19:00', 1, 'front')",
+        (week,),
     )
     conn.commit()
     conn.close()
 
     conn = appmod.db()
-    shift_ids = [row["id"] for row in conn.execute(
-        "SELECT id FROM shifts WHERE week_start=? AND area='front' ORDER BY id", (week,)
-    )]
+    shift_ids = [
+        row["id"]
+        for row in conn.execute(
+            "SELECT id FROM shifts WHERE week_start=? AND area='front' ORDER BY id", (week,)
+        )
+    ]
     conn.close()
-    form = {f"rank_{shift_id}": str(rank)
-            for rank, shift_id in enumerate(shift_ids, 1)}
+    form = {f"rank_{shift_id}": str(rank) for rank, shift_id in enumerate(shift_ids, 1)}
     response = client.post("/pick", data=form, follow_redirects=True)
     assert b"Preferences saved" in response.data
     conn = appmod.db()
-    saved = conn.execute("SELECT shift_id, rank FROM picks WHERE user_id=? ORDER BY rank",
-                         (alex_id,)).fetchall()
+    saved = conn.execute(
+        "SELECT shift_id, rank FROM picks WHERE user_id=? ORDER BY rank", (alex_id,)
+    ).fetchall()
     assert len(saved) == len(shift_ids)
     assert [row["rank"] for row in saved] == list(range(1, len(shift_ids) + 1))
     conn.close()

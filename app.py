@@ -25,6 +25,8 @@ from shiftwise.auth import login_required
 from shiftwise.db import (
     POSTGRES_SCHEMA,
     SCHEMA,
+    UNIQUE_VIOLATION_ERRORS,
+    begin_write,
     database_engine,
     db,
     execute_sql,
@@ -107,6 +109,8 @@ __all__ = [
     "execute_sql",
     "init_db",
     "monday_of",
+    "begin_write",
+    "UNIQUE_VIOLATION_ERRORS",
     "DB_PATH",  # dynamic: resolved by the _AppModule proxy, see its docstring
     "SCHEMA",
     "POSTGRES_SCHEMA",

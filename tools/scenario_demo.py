@@ -21,7 +21,6 @@ final state so you can click through it on port 5001.
 """
 
 import os
-import sqlite3
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -45,22 +44,23 @@ else:
 
 appmod.DB_PATH = db_target
 
-for suffix in ("", "-wal", "-shm"):
-    p = Path(str(appmod.DB_PATH) + suffix)
-    if p.exists():
-        p.unlink()
+if appmod.database_engine() == "sqlite":
+    for suffix in ("", "-wal", "-shm"):
+        p = Path(str(appmod.DB_PATH) + suffix)
+        if p.exists():
+            p.unlink()
 
 appmod.init_db(seed_demo=True)
-conn = sqlite3.connect(appmod.DB_PATH)
+conn = appmod.db()
 for t in (
-    "users",
-    "shifts",
     "picks",
     "coverage_preferences",
     "assignments",
     "notifications",
     "requests",
     "login_attempts",
+    "shifts",
+    "users",
 ):
     conn.execute(f"DELETE FROM {t}")
 conn.commit()

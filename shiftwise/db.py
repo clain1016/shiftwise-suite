@@ -546,7 +546,7 @@ def _postgres_pool_for(database_url):
                 # that failure mode. Scheduler compute is CPU-bound in
                 # Python, so a 30s statement budget and 5s lock-wait budget
                 # are generous backstops, not tight limits.
-                kwargs={"statement_timeout": "30s", "lock_timeout": "5s"},
+                kwargs={"options": "-c statement_timeout=30s -c lock_timeout=5s"},
             )
             try:
                 pool.open(wait=True)

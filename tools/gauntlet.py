@@ -101,12 +101,17 @@ def my(u, status="notified"):
 
 def schedule():
     c = appmod.db()
+    concat_col = (
+        "string_agg(u.name, ', ')"
+        if appmod.database_engine() == "postgres"
+        else "GROUP_CONCAT(u.name, ', ')"
+    )
     rows = c.execute(
-        "SELECT s.day, s.slots, COUNT(a.id) n, GROUP_CONCAT(u.name, ', ') names "
+        f"SELECT s.day, s.slots, COUNT(a.id) n, {concat_col} names "
         "FROM shifts s LEFT JOIN assignments a ON a.shift_id=s.id "
         "AND a.status NOT IN ('sick','swap_requested') "
         "LEFT JOIN users u ON u.id=a.user_id "
-        "WHERE s.week_start=? GROUP BY s.id",
+        "WHERE s.week_start=? GROUP BY s.id, s.day, s.slots",
         (WEEK,),
     ).fetchall()
     c.close()
@@ -294,10 +299,15 @@ def run_gauntlet():
         "a.status='sick' AND s.week_start=?",
         (WEEK,),
     ).fetchall()
+    hour_expr = (
+        "SUM(EXTRACT(EPOCH FROM (s2.end_time - s2.start_time)) / 3600.0)"
+        if appmod.database_engine() == "postgres"
+        else "SUM(julianday(s2.end_time)-julianday(s2.start_time))*24"
+    )
     over = c.execute(
-        "SELECT u.username, SUM(julianday(s2.end_time)-julianday(s2.start_time))*24 h "
+        f"SELECT u.username, {hour_expr} h "
         "FROM assignments a JOIN users u ON u.id=a.user_id JOIN shifts s2 ON "
-        "s2.id=a.shift_id WHERE a.status NOT IN ('sick','swap_requested') AND s2.week_start=? GROUP BY a.user_id",
+        "s2.id=a.shift_id WHERE a.status NOT IN ('sick','swap_requested') AND s2.week_start=? GROUP BY a.user_id, u.username",
         (WEEK,),
     ).fetchall()
     reqs = c.execute(

@@ -297,3 +297,11 @@ def test_app_facade_exports():
     assert hasattr(app, "execute_sql")
     assert app.execute_sql is sdb.execute_sql
     assert "execute_sql" in app.__all__
+
+    assert hasattr(app, "begin_write")
+    assert app.begin_write is sdb.begin_write
+    assert "begin_write" in app.__all__
+
+    assert hasattr(app, "UNIQUE_VIOLATION_ERRORS")
+    assert app.UNIQUE_VIOLATION_ERRORS is sdb.UNIQUE_VIOLATION_ERRORS
+    assert "UNIQUE_VIOLATION_ERRORS" in app.__all__

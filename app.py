@@ -56,7 +56,26 @@ _notification_patch_targets = {
 
 
 class _AppModule(types.ModuleType):
-    """Propagate legacy database and notification patches to their consumers."""
+    """Facade contract: dynamic proxy for legacy database and notification patches.
+
+    ``"DB_PATH"`` is listed in ``__all__`` but is never assigned at module
+    level. Reads resolve in ``__getattribute__`` to ``shiftwise.db.DB_PATH``;
+    writes go through ``__setattr__`` into ``shiftwise.db`` (coerced to ``Path``).
+    This indirection is required by AGENTS.md §2: legacy tests,
+    ``test_support.isolate_database``, and the tools monkeypatch ``app.DB_PATH``
+    per test/run, and those mutations must propagate to the real database module
+    instead of snapshotting a stale value on this facade (static bindings also
+    break under Python 3.14 module caching). Writes to legacy notification
+    targets (``smtplib``, ``urllib``, ``send_schedule_link``) similarly forward
+    to their respective consumer modules.
+
+    Static tools cannot see the dynamic binding, so pyflakes reports
+    ``undefined name 'DB_PATH' in __all__``. That note is expected and
+    pre-existing — do NOT "fix" it with a static ``DB_PATH = ...`` assignment,
+    which would silently break per-test database isolation. The ``del`` below
+    guarantees no stray ``DB_PATH`` entry in the module ``__dict__`` can shadow
+    the proxy.
+    """
 
     def __getattribute__(self, name):
         if name == "DB_PATH":
@@ -87,7 +106,7 @@ __all__ = [
     "execute_sql",
     "init_db",
     "monday_of",
-    "DB_PATH",
+    "DB_PATH",  # dynamic: resolved by the _AppModule proxy, see its docstring
     "SCHEMA",
     "POSTGRES_SCHEMA",
     "DAYS",

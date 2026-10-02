@@ -1,6 +1,6 @@
 # Refactoring Backlog
 
-> Status: all six items implemented (R1–R3, R6 merged; R4–R5 in review as drafts) · Last reviewed: 2026-10-01
+> Status: five items merged (R1–R3, R5, R6); R4 in review as draft · Last reviewed: 2026-10-01
 
 Bigger, judgment-call refactors left out of the mechanical cleanup in PR #13.
 Each item is specified so a future agent (or human) can pick it up and implement
@@ -104,20 +104,25 @@ open.
 
 ## R5 — `app.py` `__all__` / `DB_PATH` proxy
 
-**Problem.** `app.py:76` lists `"DB_PATH"` in `__all__`, but nothing binds that
-name in the module — it only resolves via the `_AppModule.__getattribute__`
-proxy (lines ~46-70). Works at runtime; invisible to static tools and confusing
-to a beginner.
+**Status:** implemented in [PR #25](https://github.com/clain1016/shiftwise-suite/pull/25).
 
-**Approach — pick one:**
-- (a) *(Recommended per `AGENTS.md` §2)* Keep the proxy and add a clear comment block
-  explaining the facade contract and dynamic propagation requirement.
-- (b) *(Alternative only if `AGENTS.md` §2 is formally revised)* Drop the proxy
-  and have `test_support.isolate_database` and the tools set
-  `shiftwise.db.DB_PATH` directly. Grep every user of `app.DB_PATH` /
-  `appmod.DB_PATH` first.
+**Problem (resolved).** `app.py` listed `"DB_PATH"` in `__all__`, but nothing bound
+that name at module level — it only resolved via the `_AppModule.__getattribute__`
+proxy. Works at runtime; invisible to static tools and confusing to new contributors.
 
-**Acceptance.** `pyflakes app.py` clean either way; full suite green.
+**Approach & Resolution (approach (a) per `AGENTS.md` §2).** Kept the `_AppModule`
+proxy and documented the facade contract in detail:
+- Explains why `DB_PATH` is a dynamic proxy rather than a static binding.
+- Documents the `AGENTS.md` §2 requirement that per-test database monkeypatches
+  (`app.DB_PATH = ...`) and legacy notification patches (`smtplib`, `urllib`,
+  `send_schedule_link`) must propagate to the underlying implementation modules.
+- Explains why static descriptors fail under Python 3.14 module caching.
+- Explains why pyflakes' `undefined name 'DB_PATH' in __all__` is expected and
+  must not be "fixed" by a static assignment (which would break test isolation).
+- Added an inline annotation on `"DB_PATH"` in `__all__` directing readers to
+  the `_AppModule` docstring.
+
+**Acceptance.** `pyflakes app.py` clean (only expected undefined-name note); full suite green.
 
 ## R6 — Restore the `mock_seed` force guard
 

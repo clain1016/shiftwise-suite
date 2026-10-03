@@ -33,7 +33,10 @@ ShiftWise deploys as a multi-container stack orchestrated via Docker Compose:
 > The app selects its database backend from `DATABASE_URL` (PostgreSQL when
 > set to a `postgresql://` URL, SQLite otherwise). The compose stack defaults
 > to the bundled postgres service; set `DATABASE_URL` to an empty value to
-> run the stack on the legacy SQLite volume (`shiftwise-data`).
+> run the stack on the legacy SQLite volume (`shiftwise-data`). Note: `app`
+> depends on the bundled `postgres` container, so compose always starts it —
+> it simply idles when the app isn't using it (empty `DATABASE_URL` or an
+> external database URL).
 
 ---
 
@@ -76,16 +79,20 @@ SHIFTWISE_SESSION_COOKIE_SECURE=1
 
 # PostgreSQL (bundled service): the defaults below match docker-compose.yml
 # out of the box. CHANGE POSTGRES_PASSWORD for any non-local deployment —
-# the default is a development convenience only. If you change
-# POSTGRES_USER, POSTGRES_PASSWORD, or POSTGRES_DB, set DATABASE_URL to the
-# matching URL.
+# the default is a development convenience only. docker-compose.yml assembles
+# the app's default DATABASE_URL from these three values automatically, so
+# changing them here propagates without further edits. (If the password
+# contains URL-special characters — : / @ ? # — percent-encode it.)
 POSTGRES_DB=shiftwise
 POSTGRES_USER=shiftwise
 POSTGRES_PASSWORD=change-me-in-production
 
-# Database URL for the app. Defaults (in docker-compose.yml) to the bundled
-# postgres service. Point at an external database here if you run PostgreSQL
-# outside compose, or leave empty to use the legacy SQLite database instead.
+# Database URL for the app. The compose default (assembled in
+# docker-compose.yml from POSTGRES_USER/PASSWORD/DB) already points at the
+# bundled postgres service — set this only to point at an external database,
+# or to an empty value to run the app on the legacy SQLite database instead.
+# Note: the bundled postgres container still starts (and idles) whenever you
+# bring the stack up with compose.
 # DATABASE_URL=postgresql://shiftwise:change-me-in-production@postgres:5432/shiftwise
 ```
 

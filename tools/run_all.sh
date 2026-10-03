@@ -22,7 +22,8 @@ usage() {
     cat <<'EOF'
 Usage: tools/run_all.sh [options]
 
-  (no options)              full gate: pytest + gauntlet + scenario + liveweek + compose
+  (no options)              full gate: pytest + gauntlet + scenario + chaos
+                                + liveweek + compose
   --fast                    pytest suite only (inner development loop)
   --no-liveweek             full gate without the live-week concurrency gauntlet
   --liveweek-seconds N      override the live-week duration (default 60;
@@ -96,7 +97,7 @@ if ! "${PYTHON}" -c "import pglast, pytest_timeout" >/dev/null 2>&1; then
 fi
 
 STEP=0
-TOTAL=$((4 + RUN_LIVEWEEK))
+TOTAL=$((5 + RUN_LIVEWEEK))
 
 STEP=$((STEP + 1))
 echo "--> [${STEP}/${TOTAL}] Running Unit & Integration Test Suite (pytest)..."
@@ -111,6 +112,13 @@ echo ""
 STEP=$((STEP + 1))
 echo "--> [${STEP}/${TOTAL}] Running Scenario Simulation (tools/scenario_demo.py)..."
 "${PYTHON}" "${ROOT_DIR}/tools/scenario_demo.py"
+
+echo ""
+STEP=$((STEP + 1))
+echo "--> [${STEP}/${TOTAL}] Running Chaos Simulation (tools/scenario_random.py, pinned seed)..."
+# Pinned seed keeps the gate deterministic; re-run manually with other seeds
+# (tools/scenario_random.py <seed>) for wider exploration.
+"${PYTHON}" "${ROOT_DIR}/tools/scenario_random.py" 42
 
 if [[ "${RUN_LIVEWEEK}" -eq 1 ]]; then
     echo ""

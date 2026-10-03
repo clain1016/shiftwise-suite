@@ -3,10 +3,14 @@
 
 Simulates one real scheduling week with 15 employees and 2 managers driving
 the app like production traffic: real HTTP requests against a real threaded
-WSGI server, on an isolated SQLite database. Employees pick shifts, swap,
+WSGI server, on an isolated database. Employees pick shifts, swap,
 call in sick, request vacations and days off, exchange swap invites and
 answer them; managers rebuild the schedule, add/delete shifts, triage the
 request queue, edit the roster and assign overrides.
+
+The run targets SQLite (isolated file) by default; pass --database-url (or
+set SHIFTWISE_LIVEWEEK_DATABASE_URL) to run the whole gauntlet — server,
+drills, and audits — against PostgreSQL instead.
 
 Goal: surface database, concurrency, and collision issues — WITHOUT fixing
 them. Everything is recorded as agent-ready artifacts:
@@ -19,11 +23,12 @@ them. Everything is recorded as agent-ready artifacts:
       issues/ISSUE-*.md one file per issue: evidence, traceback, code locations
       snapshots/*.html  HTML page snapshots taken at issue time
       snapshots/*.png   rendered screenshots (when a chrome binary exists)
-      liveweek.db       database state at end of run
+      liveweek.db       database state at end of run (SQLite runs only)
 
 Usage:
     .venv/bin/python tools/liveweek.py [--duration 120] [--seed N]
         [--out DIR] [--strict] [--no-screenshots]
+        [--database-url postgresql://user:pass@host:5432/db]
 
 Exit codes: 0 = harness completed (findings are the product, not failures);
 1 = harness itself broke; 2 = --strict and CRITICAL/HIGH findings present.
@@ -441,16 +446,36 @@ class WSession:
 class World:
     """Read-only DB helpers + mutable credential map (password changes)."""
 
-    def __init__(self, db_path: Path, rec: Recorder):
+    def __init__(self, db_path: Path, rec: Recorder, appmod=None):
         self.db_path = db_path
         self.rec = rec
+        self.appmod = appmod
         self.lock = threading.Lock()
         self.passwords: dict[str, str] = {}
 
-    def q(self, sql, args=()):
+    def engine(self):
+        """Database backend for this run: "sqlite" or "postgres"."""
+        if self.appmod is not None:
+            return self.appmod.database_engine()
+        return "sqlite"
+
+    def connect(self):
+        """Open a read connection through the app's DB facade.
+
+        On SQLite the facade returns a sqlite3 connection with row_factory
+        and busy_timeout already configured — identical to the previous
+        direct connect. On PostgreSQL it returns a pooled psycopg
+        connection, so the same audit code runs against both backends.
+        """
+        if self.appmod is not None:
+            return self.appmod.db()
         con = sqlite3.connect(self.db_path, timeout=30.0)
         con.row_factory = sqlite3.Row
         con.execute("PRAGMA busy_timeout=30000")
+        return con
+
+    def q(self, sql, args=()):
+        con = self.connect()
         try:
             return con.execute(sql, args).fetchall()
         finally:
@@ -539,22 +564,28 @@ def run_audit(world: World, rec: Recorder, phase: str, final: bool = False):
     Reuses the app's own rule helpers where possible."""
     findings: list[tuple[str, str, str, str]] = []  # sev, category, key, note
     try:
-        con = sqlite3.connect(world.db_path, timeout=30.0)
-        con.row_factory = sqlite3.Row
-        con.execute("PRAGMA busy_timeout=30000")
-        integrity = con.execute("PRAGMA integrity_check").fetchall()
-        if any(r[0] != "ok" for r in integrity):
-            findings.append(
-                (
-                    "CRITICAL",
-                    "integrity",
-                    "integrity_check",
-                    "; ".join(str(r[0]) for r in integrity),
+        engine = world.engine()
+        con = world.connect()
+        if engine == "sqlite":
+            integrity = con.execute("PRAGMA integrity_check").fetchall()
+            if any(r[0] != "ok" for r in integrity):
+                findings.append(
+                    (
+                        "CRITICAL",
+                        "integrity",
+                        "integrity_check",
+                        "; ".join(str(r[0]) for r in integrity),
+                    )
                 )
-            )
-        fk = con.execute("PRAGMA foreign_key_check").fetchall()
-        if fk:
-            findings.append(("CRITICAL", "integrity", "foreign_key_check", f"{len(fk)} violations"))
+            fk = con.execute("PRAGMA foreign_key_check").fetchall()
+            if fk:
+                findings.append(
+                    ("CRITICAL", "integrity", "foreign_key_check", f"{len(fk)} violations")
+                )
+        # else: PostgreSQL has no PRAGMA integrity_check / foreign_key_check.
+        # Page-level corruption detection has no portable equivalent and is
+        # skipped; the explicit per-table orphan checks below subsume
+        # foreign_key_check on both backends.
         users = {r["id"]: r for r in con.execute("SELECT * FROM users")}
         shifts = {r["id"]: r for r in con.execute("SELECT * FROM shifts")}
 
@@ -805,7 +836,10 @@ def run_audit(world: World, rec: Recorder, phase: str, final: bool = False):
                 )
             )
         con.close()
-    except sqlite3.Error as exc:
+    except Exception as exc:
+        # sqlite3.Error on SQLite, psycopg.Error on PostgreSQL; widened from
+        # sqlite3.Error so an audit failure becomes a CRITICAL finding on
+        # either backend instead of killing the auditor thread.
         findings.append(("CRITICAL", "integrity", "audit_sql", f"audit query failed: {exc}"))
 
     for sev, category, key, note in findings:
@@ -2115,7 +2149,7 @@ def write_reports(rec, run_dir, args, cfg):
 
 Run: `{run_dir.name}` | seed `{cfg["seed"]}` | {cfg["employees"]} employees + \
 {cfg["managers"]} managers | duration {cfg["duration"]}s | \
-DB `{run_dir / "liveweek.db"}`
+DB `{cfg["db"]}` ({cfg["engine"]})
 
 ## Result
 
@@ -2152,8 +2186,8 @@ DB `{run_dir / "liveweek.db"}`
 cycling the full behavior matrix (picks, swaps, invites, sick calls, vacations, \
 day-offs, switches, roster edits, triage, probes).
 - Collision drills: {", ".join(d[0] for d in DRILLS)}.
-- Final audit: DB integrity + cross-table invariants recomputed from \
-`liveweek.db`.
+- Final audit: DB integrity + cross-table invariants recomputed from the \
+{cfg["engine"]} database.
 
 ## For agents
 
@@ -2278,6 +2312,13 @@ def main(argv=None) -> int:
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--out", type=str, default=None)
     ap.add_argument(
+        "--database-url",
+        default=os.environ.get("SHIFTWISE_LIVEWEEK_DATABASE_URL"),
+        help="PostgreSQL URL for the run (e.g. postgresql://shiftwise:shiftwise"
+        "@127.0.0.1:5432/shiftwise). When unset, the run uses an isolated "
+        "SQLite file exactly as before.",
+    )
+    ap.add_argument(
         "--strict", action="store_true", help="exit 2 when CRITICAL/HIGH findings exist"
     )
     ap.add_argument("--no-screenshots", action="store_true")
@@ -2297,6 +2338,12 @@ def main(argv=None) -> int:
 
     print(f"liveweek: artifacts -> {run_dir}")
     print(f"liveweek: seed={seed}")
+    if args.database_url:
+        # Must be set before the app is imported and init_db() runs: the db
+        # facade reads DATABASE_URL whenever it selects the backend, and
+        # seeding must create the PostgreSQL schema, not the SQLite one.
+        os.environ["DATABASE_URL"] = args.database_url
+        print("liveweek: targeting PostgreSQL")
     try:
         appmod, srv, base = boot_server(db_path, run_dir)
     except Exception:
@@ -2304,7 +2351,7 @@ def main(argv=None) -> int:
         return 1
     try:
         seed_world(appmod, db_path, rec)
-        world = World(db_path, rec)
+        world = World(db_path, rec, appmod)
         world_week = appmod.monday_of(date.today()).isoformat()
         import mock_seed
 
@@ -2523,6 +2570,16 @@ def main(argv=None) -> int:
                 "base": base,
                 "week": world_week,
                 "strict": args.strict,
+                "engine": world.engine(),
+                "db": (
+                    re.sub(
+                        r"://([^:/?#]+):[^@/?#]*@",
+                        r"://\1:***@",
+                        args.database_url or os.environ.get("DATABASE_URL", ""),
+                    )
+                    if world.engine() == "postgres"
+                    else str(run_dir / "liveweek.db")
+                ),
             },
         )
         n_crit = sum(1 for i in issues if i["severity"] == "CRITICAL")

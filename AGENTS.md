@@ -17,7 +17,7 @@
 - **No Stale Test Artifacts:**
   - Tests and simulation harnesses may generate SQLite databases (`app.db`, `test_*.db`, `shiftwise-mock/mock.db`, `tools/*.db`) and cache directories (`__pycache__`, `.pytest_cache`).
   - Always clean up temporary databases and caches before committing, creating PRs, or proceeding to deployment.
-  - Simulation tools like `tools/liveweek.py` and `tools/scenario_demo.py` write local databases (`tools/*.db`); remove these before pushing or checking status.
+  - Simulation tools like `tools/liveweek.py`, `tools/gauntlet.py`, `tools/scenario_demo.py`, and `tools/scenario_random.py` write local databases (`tools/*.db`); remove these before pushing or checking status.
   - `git status` must be completely clean (`nothing to commit, working tree clean`) with no untracked artifacts.
 - The canonical cleanup is `./tools/clean_artifacts.sh` (databases, `__pycache__`, `*.pyc`, `.pytest_cache`); add `--liveweek-artifacts` to also drop the gauntlet findings kept for fixing agents. `tools/run_all.sh` runs it on entry and on exit, so a normal or aborted gate leaves the tree clean; a `SIGKILL`ed run still needs the manual command.
 
@@ -34,9 +34,10 @@
 
 - Before marking any phase complete, opening a PR, or deploying, the full gate (`./tools/run_all.sh`) must pass:
   - the full collected pytest unit & integration suite passes 100% green;
-  - the 11-phase stress gauntlet (`tools/gauntlet.py`) and `tools/scenario_demo.py` complete without error;
+  - the 11-phase stress gauntlet (`tools/gauntlet.py`), `tools/scenario_demo.py`, and the seeded chaos simulation (`tools/scenario_random.py 42`, pinned seed) complete without error;
   - the live-week concurrency gauntlet (`tools/liveweek.py`) completes without harness error; its findings are recorded as artifacts in `tools/liveweek-artifacts/` (gitignored) for fixing agents — they are reports, not suite failures (`--strict` enforces them in CI). Duration is configurable via `--liveweek-seconds N` or `SHIFTWISE_LIVEWEEK_SECONDS`;
   - `docker compose config` validates.
+- Failure contract: the scenario steps (`gauntlet.py`, `scenario_demo.py`, `scenario_random.py`) fail the gate on unhandled exceptions or failed assertions; their printed final audits (understaffing, over-cap, cross-house leaks) are informational, matching the `scenario_demo.py` contract. `liveweek.py` findings are structured issues instead — reports by default, enforced with `--strict`.
 - `./tools/run_all.sh --fast` runs the pytest suite only (for the inner development loop) and prints the full-gate reminder.
 - Dev extras (`requirements-dev.txt`: `pytest-timeout`, `pglast`) are required for a fully green suite: without `pglast` the PostgreSQL DDL parser test skips, and `pytest.ini` caps each test at 180 s so a lock wait or dialect error cannot hang a run.
 - `tools/check_entrypoints.py` (run as step `[0]` of `tools/run_all.sh`) asserts the tracked shell entrypoints (`tools/run_all.sh`, `tools/clean_artifacts.sh`, `docker-entrypoint.sh`, `shiftwise-mock/sync.sh`) keep mode `100755` via `git ls-files -s`. It catches the regression class PR #18 shipped: a dropped executable bit silently breaks the documented `./tools/run_all.sh` while every test still passes.

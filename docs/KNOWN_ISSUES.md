@@ -248,7 +248,8 @@ ranges for the same employee. Two concurrent submissions both pass validation.
 
 ### T1 — `scenario_random.py` crashes after station flip (harness bug)
 
-**Severity:** TEST HARNESS · **Reproducible:** Yes (seed 2356211046)
+**Severity:** TEST HARNESS · **Reproducible:** Yes (seed 2356211046)  
+**Status:** FIXED (PR #30, commit `bc50845`) — the rank form now covers all shifts per area (cf. `day_shift_ids` in `scenario_demo.py`); verified with the original seed `2356211046` and the pinned gate seed `42`.
 
 **Symptom.** `AssertionError: pick rejected for maria` when Maria is flipped
 from front-of-house to back-of-house.
@@ -398,4 +399,4 @@ For full implementation details, task checklists, and forward engineering handof
 | M1 | MEDIUM | Pervasive latency | OPEN (root cause = C1) |
 | M2 | MEDIUM | Invite inconsistency | OPEN |
 | M3 | MEDIUM | Duplicate vacation accepted | OPEN |
-| T1 | TEST | scenario_random station-flip crash | OPEN |
+| T1 | TEST | scenario_random station-flip crash | FIXED (PR #30) |

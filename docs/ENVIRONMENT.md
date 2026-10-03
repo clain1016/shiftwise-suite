@@ -19,6 +19,18 @@ All ShiftWise configuration is driven through environment variables prefixed wit
 
 ---
 
+## Database Backend Variables
+
+| Variable | Type | Default Value | Used In | Description & Recommendations |
+|---|---|---|---|---|
+| `DATABASE_URL` | URL | *(compose default: bundled postgres; otherwise unset)* | `shiftwise/db.py`, `docker-compose.yml` | Selects the database backend. A `postgresql://` URL selects PostgreSQL; unset or empty selects SQLite. In the compose stack it defaults to the bundled `postgres` service — override in `.env` to use an external database, or set empty for SQLite. |
+| `SHIFTWISE_DB_ENGINE` | String | *Auto-detected* | `shiftwise/db.py` | Explicit backend override: `sqlite` or `postgres`/`postgresql`. Rarely needed — the engine is normally detected from `DATABASE_URL`. |
+| `POSTGRES_DB` | String | `shiftwise` | `docker-compose.yml` | Database name created by the bundled postgres service. If changed, update `DATABASE_URL` to match. |
+| `POSTGRES_USER` | String | `shiftwise` | `docker-compose.yml` | Database user for the bundled postgres service. If changed, update `DATABASE_URL` to match. |
+| `POSTGRES_PASSWORD` | String | `shiftwise` | `docker-compose.yml` | Database password for the bundled postgres service. **Change this in `.env` for any non-local deployment**; the default is a development convenience only. If changed, update `DATABASE_URL` to match. |
+
+---
+
 ## Container & Proxy Variables
 
 | Variable | Type | Default Value | Used In | Description & Recommendations |

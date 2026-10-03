@@ -1,4 +1,27 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-shiftwise}
+      POSTGRES_USER: ${POSTGRES_USER:-shiftwise}
+      # Set a strong POSTGRES_PASSWORD in .env for any non-local deployment;
+      # the default below is a development convenience only. The app's
+      # default DATABASE_URL is assembled from these values automatically.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shiftwise}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - app-internal
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-shiftwise} -d ${POSTGRES_DB:-shiftwise}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   app:
     build: .
     image: shiftwise:local
@@ -13,11 +36,22 @@ services:
         required: false
     environment:
       SHIFTWISE_DB_PATH: /data/scheduler.db
+      # Default: use the bundled postgres service, assembled from
+      # POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB so .env changes
+      # propagate automatically. Override DATABASE_URL itself in .env to
+      # point at an external database, or set it empty to run on SQLite
+      # (the pre-Phase-5 behavior). Passwords containing URL-special
+      # characters (: / @ ? #) must be percent-encoded.
+      DATABASE_URL: ${DATABASE_URL-postgresql://${POSTGRES_USER:-shiftwise}:${POSTGRES_PASSWORD:-shiftwise}@postgres:5432/${POSTGRES_DB:-shiftwise}}
+    depends_on:
+      postgres:
+        condition: service_healthy
 
     volumes:
       - shiftwise-data:/data
     networks:
       - app-proxy
+      - app-internal
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -69,8 +103,10 @@ services:
 
 networks:
   app-proxy: {}
+  app-internal: {}
 
 volumes:
   shiftwise-data: {}
+  postgres-data: {}
   caddy-data: {}
   caddy-config: {}
